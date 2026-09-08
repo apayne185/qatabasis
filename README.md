@@ -380,6 +380,7 @@ After 10 iterations, iteration 10 checkpoint was deleted. The stack detected the
 | `make slurm-ibm-seeds` | Multi-seed IBM QPU runs |
 | `make aggregate-seeds` | Aggregate multi-seed results → median + range table |
 | `make aggregate-scaling` | Build strong-scaling table from JSONs |
+| `make backup-results` | Commit + push `results/` — run after any benchmark so results survive a local machine failure. No-ops cleanly if nothing changed. |
 
 
 ## IBM Quantum Setup
