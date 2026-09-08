@@ -5,6 +5,40 @@ execution paths for our target problem set. Motivated by reviewer question 1
 in the paper prep: *"how does this stack compare to widely used single-vendor
 alternatives?"*
 
+## Status: executed, results committed
+
+The plan below ran to completion on an A100-SXM4-40GB Lambda instance: 18
+runs across 3 backends (`hpchybrid`, `lightning`, `aer-mpi`) × 6 molecules
+(H2, LiH, BeH2, H2O, NH3, N2). The live, citable results are in
+`results/baseline_comparison_gpuexpect/paper_table.md` (this is the current
+Table 1 candidate for the paper) — the original `results/baseline_comparison/`
+directory (pre-Fix-A) is superseded, and
+`results/baseline_comparison_legacy_check/` holds the `VQE_LEGACY_EXPECT=1`
+A/B check.
+
+Two real fairness bugs were found and fixed during this work, both worth
+knowing before citing any number from this comparison:
+
+1. **Lightning ansatz-parity bug**: the hand-ported Lightning ansatz in
+   `benchmarks/baseline_comparison.py` used the wrong `reps` value and
+   entanglement pattern, giving Lightning 25-33% fewer parameters than
+   hpchybrid across all 6 molecules — every pre-fix Lightning number was
+   measured on an easier problem. Fixed by asserting parameter-count parity
+   before proceeding; results under `results/baseline_comparison_gpuexpect/`
+   are post-fix. The old `results/baseline_comparison_gpuexpect/lightning/`
+   pre-fix files are marked invalid in their own `README-INVALIDATED.md`.
+2. **Serial-baseline path-parity bug**: `benchmarks/serial_baseline.py`
+   used to re-implement its own ansatz-construction logic, which diverged
+   from the distributed stack's for H2 and LiH. Fixed by routing it through
+   the same `MoleculeResolver` → `ChemistryProblem` → `prepare()` path used
+   everywhere else, so serial and distributed numbers are now built from
+   bit-identical ansätze.
+
+The rest of this document is the original comparison plan, kept as the
+design record for what was measured and why. See
+[`GPU_EXPECTATION_FIX.md`](GPU_EXPECTATION_FIX.md) for the related GPU-native
+expectation fix that this comparison's numbers depend on.
+
 Cross-refs: `docs/RELATED_WORK.md` (qualitative positioning),
 `docs/KNOWN_GAPS.md` gap H (distributed statevector — the leading reason a
 per-rank-replicated stack underperforms distributed simulators),
