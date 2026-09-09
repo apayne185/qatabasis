@@ -41,7 +41,7 @@ Tested on the IE University capstone cluster (Debian 13, Slurm, CUDA 12.4, RTX 6
 
 ### Path C — Interactive walkthrough
 
-See [`template.py`](template.py) for a step-by-step Python walkthrough. See [`MOLECULES.md`](MOLECULES.md) for all available built-in molecules. Full API reference — including every environment variable, every public class, and how to add a new molecule / ansatz / backend — is in [`docs/API.md`](docs/API.md). Deferred work with technical explanations (UCCSD, distributed statevector, backend plugins, etc.) is documented in [`docs/FUTURE_WORK.md`](docs/FUTURE_WORK.md).
+See [`template.py`](template.py) for a step-by-step Python walkthrough. See [`MOLECULES.md`](MOLECULES.md) for all available built-in molecules. Full API reference — including every environment variable, every public class, and how to add a new molecule / ansatz / backend — is in [`docs/API.md`](docs/API.md). Deferred work with technical explanations (UCCSD, distributed statevector, backend plugins, etc.) is documented in [`docs/FUTURE_WORK.md`](docs/FUTURE_WORK.md). Before citing any number out of `results/`, see [`docs/RESULT_PROVENANCE.md`](docs/RESULT_PROVENANCE.md) — this stack has changed enough since earlier sessions that an old, superseded, or branch-only result is easy to grab by mistake.
 
 ---
 
