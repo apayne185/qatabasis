@@ -6,7 +6,7 @@ pyscf>=2.14.0
 
 # HPC / parallel
 mpi4py>=4.1.2
-numpy>=2.5.2
+numpy>=2.5.3
 scipy>=1.18.1
 
 # Testing
