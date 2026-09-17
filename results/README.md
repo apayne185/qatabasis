@@ -10,8 +10,34 @@ results/
     scaling/      scaling_P<N>.txt, weak_scaling_P<N>.txt
     ibm/          ibm_run_<ts>.log + ibm_cloud_<ts>.json
     baseline/     serial_baseline_<ts>.json (serial-baseline backend only)
+    trial/        7-layer diagnostic logs (make trial / make slurm-trial)
+    slurm/        raw Slurm job logs, if run via sbatch
+    session-archives/  termination snapshots (code + git log) from a cloud
+                       rental, kept for provenance
+  baseline_comparison/           external-baseline sweep (hpchybrid vs
+                                  Lightning-GPU vs Aer-MPI), one subfolder
+                                  per backend: hpchybrid/, lightning/, aer-mpi/
+  baseline_comparison_gpuexpect/ same sweep, re-run after the GPU-native
+                                  expectation fix ("Fix A") + Lightning
+                                  ansatz-parity fix landed — this is the
+                                  current, citable version; see
+                                  `paper_table.md` inside it
+  baseline_comparison_legacy_check/  A/B check of `VQE_LEGACY_EXPECT=1`
+                                       against the gpuexpect sweep
+  blocking_sweep/                 Aer-MPI `blocking_qubits` tuning sweep
+                                  (N2), organized as np<N>/aer-mpi/
+  profiling/                      Nsight Systems `.nsys-rep` captures
   plots/          aggregate figures generated from the above (hardware-agnostic)
 ```
+
+Hardware folders may carry a `-YYYY-MM-DD` date suffix (e.g.
+`a100-sxm4-40gb-2026-09-07/`) when a second, distinct session on the same
+returning hardware class needs to stay separable from the first session's
+folder — for example when re-running a sweep after a regression fix, so the
+old and new data can both be inspected without one silently overwriting or
+merging into the other. Treat a dated sibling folder as a separate,
+self-contained session; check its own README/notes (if present) before
+assuming it supersedes the undated folder.
 
 ## Current hardware folders
 

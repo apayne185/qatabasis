@@ -23,7 +23,8 @@ endif
 .PHONY: build trial run run-ibm scaling baseline clean shell test pytest \
         native-install native-trial native-run \
         slurm-trial slurm-run slurm-scaling slurm-weak-scaling slurm-ibm \
-        slurm-multi-seed slurm-ibm-seeds aggregate-seeds aggregate-scaling
+        slurm-multi-seed slurm-ibm-seeds aggregate-seeds aggregate-scaling \
+        backup-results
 
 build:
 	@echo "[Make] Building Docker image '$(IMAGE_NAME)' ..."
@@ -113,10 +114,14 @@ scaling:
 	@echo "[Make] Scaling logs saved to results/scaling/. Check T_total and M-metric."
 
 # WEAK SCALING SWEEP - problem size grows with P
+# P=16 added for NH3 (see local_test_run.py:run_weak_scaling). N2 has no
+# tier -- would need P=32 on the same single Docker host as everything
+# else, deeper into the shared-memory contention regime than any other
+# scaling data in the paper goes; deliberately left out, disclosed in text.
 weak-scaling:
 	@echo "[Make] Starting weak scaling analysis ..."
 	@mkdir -p results/scaling
-	@for p in 1 2 4 8; do \
+	@for p in 1 2 4 8 16; do \
 	  echo "  Running P=$$p (weak scaling) ..."; \
 	  docker run --rm \
 	    $(GPU_FLAG) \
@@ -267,3 +272,24 @@ aggregate-seeds:
 # Build strong-scaling table from scaling sweep JSONs (filtered to seed=42).
 aggregate-scaling:
 	python3 benchmarks/aggregate_scaling.py
+
+
+# Commit + push results/ so a run's output survives a local disk failure.
+# Safe to run after any make target above -- no-ops cleanly if nothing changed.
+# Does NOT touch checkpoints/ (deliberately gitignored -- ephemeral,
+# regenerate-on-crash by rerunning rather than resuming) or .env (secrets).
+backup-results:
+	@git add results/
+	@if git diff --cached --quiet -- results/; then \
+	  echo "[Make] backup-results: nothing new under results/ to commit."; \
+	else \
+	  git commit -m "results: backup $$(date -u +%Y-%m-%dT%H:%M:%SZ)" -- results/; \
+	  echo "[Make] backup-results: committed."; \
+	fi
+	@branch=$$(git rev-parse --abbrev-ref HEAD); \
+	if git rev-parse --abbrev-ref --symbolic-full-name "$$branch@{upstream}" > /dev/null 2>&1; then \
+	  git push; \
+	  echo "[Make] backup-results: pushed $$branch."; \
+	else \
+	  echo "[Make] backup-results: '$$branch' has no upstream yet -- run 'git push -u origin $$branch' once to enable auto-push here."; \
+	fi

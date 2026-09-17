@@ -62,6 +62,14 @@ Everything is controlled through environment variables — no code changes neede
 | `IBM_QUANTUM_TOKEN` | string | Required for `BACKEND=ibm_cloud`. See IBM Quantum Setup below. |
 | `IBM_QUANTUM_INSTANCE` | CRN string | Required for `BACKEND=ibm_cloud` — from the same IBM Cloud account as the token |
 | `IBM_QUANTUM_BACKEND` | backend name | e.g. `ibm_marrakesh`, `ibm_torino`, `ibm_kyiv` |
+| `VQE_LEGACY_EXPECT` | `1` | Force the legacy CPU-side expectation path even at `NP=1` (A/B testing) |
+| `VQE_GPU_EXPECT_MPI` | `1` | Force the GPU-native expectation path even at `NP>=2` (has a known ~3.6x per-iter MPI regression — see `docs/GPU_EXPECTATION_FIX.md`; not for published results) |
+
+By default the stack picks the faster GPU-native expectation path at
+`NP=1` and the legacy path at `NP>=2` (the GPU-native path regresses under
+multi-rank MPI contention for one GPU). See
+[`docs/GPU_EXPECTATION_FIX.md`](docs/GPU_EXPECTATION_FIX.md) for the full
+measurement.
 
 Example — run only H₂O with the GPU on 4 ranks, seed 43:
 ```bash
@@ -171,10 +179,10 @@ The stack has been validated on multiple GPU classes to characterize the hardwar
 
 | GPU | Class | Memory | Bandwidth | Where |
 |-----|-------|-------:|----------:|-------|
-| GTX 1650 Mobile | Consumer (Turing) | 4 GB GDDR6 | 128 GB/s | Original thesis baseline (Lambda) |
-| RTX 6000 Ada | Workstation (Ada Lovelace) | 48 GB GDDR6 ECC | 960 GB/s | IE capstone cluster ✓ |
-| A100 40GB SXM4 | Datacenter (Ampere) | 40 GB HBM2e | 1,555 GB/s | Lambda Cloud (planned) |
-| H100 80GB SXM5 | Datacenter (Hopper) | 80 GB HBM3 | 3,350 GB/s | Lambda Cloud (planned) |
+| GTX 1650 Mobile | Consumer (Turing) | 4 GB GDDR6 | 128 GB/s | Original thesis baseline — raw data presumed lost, see `results/gtx1650-reference/README.md`; excluded from published GPU-vs-GPU comparisons |
+| RTX 6000 Ada | Workstation (Ada Lovelace) | 48 GB GDDR6 ECC | 960 GB/s | IE capstone cluster ✓ — full P∈{1,2,4,8} scaling committed |
+| A100 40GB SXM4 | Datacenter (Ampere) | 40 GB HBM2e | 1,555 GB/s | **Primary hardware** — Lambda Cloud ✓ — full P∈{1,2,4,8} scaling + multi-seed + baseline comparison + IBM QPU triple-integration all committed |
+| H100 80GB SXM5 | Datacenter (Hopper) | 80 GB HBM3 | 3,350 GB/s | Not yet validated (planned) |
 
 The bandwidth range (128 → 3,350 GB/s, a 26× span) exercises statevector simulation's memory-bandwidth-bound behavior (Bayraktar et al., 2023) across generations of NVIDIA hardware. Consumer-class GPUs establish a lower bound; datacenter GPUs demonstrate the ceiling.
 
@@ -372,6 +380,7 @@ After 10 iterations, iteration 10 checkpoint was deleted. The stack detected the
 | `make slurm-ibm-seeds` | Multi-seed IBM QPU runs |
 | `make aggregate-seeds` | Aggregate multi-seed results → median + range table |
 | `make aggregate-scaling` | Build strong-scaling table from JSONs |
+| `make backup-results` | Commit + push `results/` — run after any benchmark so results survive a local machine failure. No-ops cleanly if nothing changed. |
 
 
 ## IBM Quantum Setup
@@ -500,6 +509,7 @@ The following extensions are planned to address current limitations and broaden 
 - **Single-host MPI in the current benchmarks** — Reported scaling data uses ranks on one node with shared CPU cache/memory. Multi-node cluster deployment with InfiniBand would reduce shared-memory contention observed at P≥4 on CPU. GPU-accelerated MPI at higher rank counts is stable on the RTX 6000 Ada single-host configuration.
 - **IBM Open Plan QPU budget** — 10 min/month per account, limiting statistical robustness on the QPU path. Multi-seed methodology (`benchmarks/aggregate_seeds.py`) applies to QPU runs but is budget-constrained; publication statistics rely primarily on simulator seeds.
 - **`hpc_core.so` requires CUDA-compatible host compiler** — CUDA 12.4 requires GCC ≤ 13. Pinned in `environment.yml`; `install_native.sh` auto-configures the correct compiler on supported clusters.
+- **C++ dispatcher's local-compute path is diagnostic-only, guarded** — the C++/CUDA path (`hpc_core.execute()`) uses a mean-field product-state approximation, not physically correct for entangled circuits. It is never reached by `simulator`/`ibm_cloud` (every published result), and is now additionally gated behind `VQE_ALLOW_MEANFIELD=1` so it cannot be silently exercised if the backend dispatch is ever refactored. The C++ dispatcher's other responsibilities — MPI init/finalize, rank/size discovery, round-robin GPU device assignment, and the IBM QPU REST client — are real, unguarded, production code paths; only the local-compute fallback is fenced.
 
 ---
 

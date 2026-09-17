@@ -16,6 +16,64 @@ import statistics
 import sys
 from glob import glob
 
+# The buggy GPU-native-expectation-under-MPI code path only exists between
+# these two commits -- it did not exist before 411486b (so anything earlier,
+# e.g. the July 2026 seed sweep, never had the bug to trigger) and was fixed
+# by 90008c9. Any run with mpi_ranks >= 2 timestamped strictly inside this
+# window used the buggy path (measured 3.6x slower per-iteration on H2O),
+# producing misleading scaling/timing numbers -- not an energy correctness
+# bug by itself, but it silently mixes a broken configuration into a table
+# of otherwise-fixed-path data if not excluded.
+#   411486b "interface: GPU-native Pauli expectation via Aer
+#            save_expectation_value" -- 2026-09-01 13:04:45+02:00 (bug introduced)
+#   90008c9 "interface: MPI-safe default for GPU-native expectation
+#            (fixes MPI regression)" -- 2026-09-04 12:44:33+02:00 (bug fixed)
+# Compared as digits-only strings against each JSON's own timestamp field
+# (handles both "2026-09-04T10:03:23" and "20260904_100323" shapes), since
+# git_commit is "unknown" in every JSON produced before that field was made
+# reliable -- timestamp is the only signal actually available. See
+# docs/RESULT_PROVENANCE.md.
+_MPI_REGRESSION_BUG_INTRODUCED = "20260901130445"  # digits only
+_MPI_REGRESSION_BUG_FIXED = "20260904124433"       # digits only
+
+# 2026-09-05: commit eabcaef (PR #37) reset _best_physical_energy per
+# molecule. Before this, a multi-molecule process leaked the previous
+# converged molecule's cached energy into any later molecule whose SPSA
+# trajectory dropped below FCI (NH3 inheriting H2O's value being the
+# concrete, repeated case). Rather than hardcode a fix date (multi-molecule
+# runs from well before this date can still be affected if they were never
+# re-run), detect the actual signature directly: two different molecules
+# in the same run reporting bit-identical energy is not physically
+# plausible and is the exact fingerprint of this bug.
+
+
+def _is_mpi_regression_window(d: dict) -> bool:
+    ts = d.get("timestamp", "")
+    ranks = d.get("mpi_ranks")
+    if ranks is None or ranks < 2:
+        return False
+    digits = "".join(c for c in ts if c.isdigit())
+    if len(digits) < 14:
+        return False
+    key = digits[:14]
+    return _MPI_REGRESSION_BUG_INTRODUCED <= key < _MPI_REGRESSION_BUG_FIXED
+
+
+def _has_cross_molecule_contamination(d: dict) -> str | None:
+    """Return an offending (mol_a, mol_b) description if two molecules in
+    this run report an identical energy -- the _best_physical_energy leak
+    signature -- else None."""
+    mols = d.get("molecules", {})
+    seen: dict[float, str] = {}
+    for mol, data in mols.items():
+        e = data.get("energy")
+        if e is None:
+            continue
+        if e in seen and seen[e] != mol:
+            return f"{mol} energy ({e}) is identical to {seen[e]}'s"
+        seen[e] = mol
+    return None
+
 
 def load_seeded_results(backend: str, since: str | None,
                         ranks: int | None, hw: str | None = None) -> list[dict]:
@@ -24,6 +82,14 @@ def load_seeded_results(backend: str, since: str | None,
     Deduplicates by (seed, mpi_ranks), keeping the most recent — guards against
     accidental contamination when scaling sweeps reuse SEED=42 default and
     produce JSONs at multiple P values.
+
+    Also rejects two known-bad file signatures rather than silently
+    including them -- see docs/RESULT_PROVENANCE.md for the incidents that
+    motivated this:
+      1. Runs at mpi_ranks>=2 timestamped inside the MPI-regression window
+         (before commit 90008c9 landed).
+      2. Runs where two molecules report a bit-identical energy (the
+         _best_physical_energy cross-molecule leak signature).
     """
     pattern = os.path.join("results", hw or "*", backend, f"{backend}_*.json")
     files = sorted(glob(pattern))
@@ -41,28 +107,58 @@ def load_seeded_results(backend: str, since: str | None,
             continue
         if ranks is not None and d.get("mpi_ranks") != ranks:
             continue
+        if _is_mpi_regression_window(d):
+            print(f"[skip] {path}: mpi_ranks={d.get('mpi_ranks')} run timestamped "
+                  f"before the MPI-regression fix (90008c9, 2026-09-04 12:44:33) "
+                  f"-- known 3.6x per-iter slowdown under this config, excluded "
+                  f"from aggregation. See docs/RESULT_PROVENANCE.md.",
+                  file=sys.stderr)
+            continue
+        contamination = _has_cross_molecule_contamination(d)
+        if contamination:
+            print(f"[skip] {path}: cross-molecule energy contamination detected "
+                  f"({contamination}) -- signature of the pre-eabcaef "
+                  f"_best_physical_energy leak bug, excluded from aggregation. "
+                  f"See docs/RESULT_PROVENANCE.md.", file=sys.stderr)
+            continue
         d["_path"] = path
         d["_hw_slug"] = path.split(os.sep)[1]
         candidates.append(d)
 
-    # Dedup by (seed, mpi_ranks) - keep the most complete run (most molecules
-    # covered, most recent as tiebreaker). A pure "most recent" rule silently
-    # drops the real multi-molecule sweep whenever the same (seed, P) pair
-    # gets reused later for an unrelated single-molecule probe (e.g. an
-    # N2-only run at seed=42, P=2 clobbering the actual H2/LiH/BeH2/H2O
-    # seed=42 run) -- same failure mode as aggregate_scaling.py's best_by_rank.
-    by_key = {}
+    # Group by (seed, mpi_ranks) and MERGE molecule coverage across every
+    # file sharing that key, rather than picking one winning file. A "most
+    # complete single file wins" rule silently drops legitimate data: a
+    # standalone NH3-only or N2-only probe at seed=42 (run separately because
+    # no full n=5 sweep exists for those molecules yet) used to be invisible
+    # whenever a bigger H2/LiH/BeH2/H2O seed=42 sweep also existed for the
+    # same (seed, ranks) key, even though the two files cover disjoint
+    # molecules and both are legitimate. When the SAME molecule appears in
+    # more than one file for a key, keep the more recently-timestamped copy
+    # (guards against a stale single-molecule rerun silently overriding a
+    # newer sweep's number for that molecule, or vice versa).
+    grouped: dict[tuple, list[dict]] = {}
     for d in candidates:
         key = (d["seed"], d.get("mpi_ranks"))
-        current = by_key.get(key)
-        if current is None:
-            by_key[key] = d
-            continue
-        n_mols = len(d.get("molecules", {}))
-        current_n_mols = len(current.get("molecules", {}))
-        if (n_mols, d.get("timestamp", "")) > (current_n_mols, current.get("timestamp", "")):
-            by_key[key] = d
-    return list(by_key.values())
+        grouped.setdefault(key, []).append(d)
+
+    merged_runs = []
+    for key, group in grouped.items():
+        group_sorted = sorted(group, key=lambda d: d.get("timestamp", ""))
+        merged_molecules: dict[str, dict] = {}
+        mol_source: dict[str, str] = {}  # for the printed file listing below
+        for d in group_sorted:
+            for mol, data in d.get("molecules", {}).items():
+                merged_molecules[mol] = data
+                mol_source[mol] = d["_path"]
+        # Base the merged record on the most recent file (for fields like
+        # gpu_name/hostname/scaling that aren't per-molecule), then overlay
+        # the merged molecule set.
+        base = dict(group_sorted[-1])
+        base["molecules"] = merged_molecules
+        base["_merged_from"] = sorted({d["_path"] for d in group})
+        base["_mol_source"] = mol_source
+        merged_runs.append(base)
+    return merged_runs
 
 
 def aggregate(runs: list[dict]) -> dict[str, dict]:
@@ -191,10 +287,18 @@ def main():
         sys.exit(1)
 
     rank_label = f"P={ranks_filter}" if ranks_filter else "any P"
-    print(f"Found {len(runs)} unique {args.backend} run(s) at {rank_label}, "
-          f"hw={hw_slugs.pop() if hw_slugs else 'n/a'} (deduped by seed+rank):")
+    print(f"Found {len(runs)} unique (seed, rank) group(s) at {rank_label}, "
+          f"hw={hw_slugs.pop() if hw_slugs else 'n/a'} (molecule coverage merged across files sharing a seed):")
     for r in runs:
-        print(f"  seed={r['seed']:<4} {r.get('timestamp', '?')[:19]}  {r['_path']}")
+        sources = r.get("_merged_from", [r.get("_path", "?")])
+        mols = sorted(r.get("molecules", {}).keys())
+        if len(sources) == 1:
+            print(f"  seed={r['seed']:<4} {r.get('timestamp', '?')[:19]}  {sources[0]}  [{', '.join(mols)}]")
+        else:
+            print(f"  seed={r['seed']:<4} merged from {len(sources)} files -> [{', '.join(mols)}]")
+            for src in sources:
+                src_mols = sorted(m for m, p in r.get("_mol_source", {}).items() if p == src)
+                print(f"      {src}  [{', '.join(src_mols)}]")
 
     by_mol = aggregate(runs)
     report(by_mol)

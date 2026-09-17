@@ -164,6 +164,22 @@ by getting a bigger single GPU. This bounds the science story of the
 paper at 30 qubits (CO₂ on 40 GB A100). Statevector tiling would enable
 40+ qubit molecules on 8×A100/8×H100 nodes.
 
+**Measured, not hypothetical — Aer's single-GPU `blocking_enable` mode is
+not the answer.** A 2026-09-01 A100 sweep tested whether Qiskit Aer's own
+distributed-statevector mode (`AerSimulator(blocking_enable=True)`) closes
+this gap without a stack rearchitecture. It does not: `aer-mpi` lost to the
+current replicated-SV design at every tested size from H2 (4q) through N2
+(20q), and the gap widens exponentially with qubit count (aer-mpi was 8.6x
+*slower* than hpchybrid at N2). See
+[`GPU_EXPECTATION_FIX.md`](GPU_EXPECTATION_FIX.md)'s "Crossover measurement"
+section for the full table. The reason is architectural: Aer's blocking
+mode trades single-kernel-launch efficiency for communication overhead
+*within the same physical GPU*, which loses for Pauli-heavy VQE workloads
+at any tested size. This means the fix described below — genuine
+**multi-GPU** cuStateVec tiling, where each GPU holds only 2ⁿ/P amplitudes
+— remains the correct target; a config-only fix (routing to Aer's existing
+blocking mode above some qubit threshold) was tested and ruled out.
+
 Multi-node MPI validation matters separately for the "HPC middleware"
 claim: currently the paper says "distributed VQE" but demonstrates only
 single-host multi-rank runs. A reviewer will ask whether the code

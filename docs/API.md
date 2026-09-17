@@ -47,6 +47,18 @@ are needed to switch hardware, backends, or workloads.
 | `IBM_QUANTUM_TOKEN` | string | (required for `ibm_cloud`) | IBM Quantum API token |
 | `IBM_QUANTUM_INSTANCE` | CRN string | (required for `ibm_cloud`) | From the SAME account as the token |
 | `IBM_QUANTUM_BACKEND` | backend name | (required for `ibm_cloud`) | e.g. `ibm_marrakesh`, `ibm_torino`, `ibm_kyiv` |
+| `VQE_LEGACY_EXPECT` | `1` \| unset | unset | Force the legacy CPU-side expectation path (GPU→CPU statevector copy + numpy) even at `NP=1`, where the GPU-native path is normally faster. Useful for A/B measurement or regression checks. |
+| `VQE_GPU_EXPECT_MPI` | `1` \| unset | unset | Force the GPU-native expectation path (`save_expectation_value`) even under MPI at `NP>=2`, where it is **not** the default due to a measured 3.6x per-iteration regression (per-rank Aer transpile cost amplifies when multiple ranks contend for one GPU). Only for validating a future fix — do not use for published results until that regression is resolved. |
+
+**GPU-native vs. legacy expectation routing**: the stack picks between two
+ways of computing Pauli expectation values on GPU (`_expectation_on_gpu` vs.
+the legacy build-statevector-then-numpy path in
+[`interface.py`](../src/api/interface.py)). By default it uses the faster
+GPU-native path at `NP=1` (~1.5x speedup, validated) and falls back to the
+legacy path at `NP>=2` (the GPU-native path regresses under MPI contention
+for the same GPU). See [`GPU_EXPECTATION_FIX.md`](GPU_EXPECTATION_FIX.md)
+for the full measurement and rationale. The two env vars above override
+this default for A/B testing.
 
 Example — run only H₂O on GPU with 4 ranks, seed 43:
 
@@ -324,9 +336,16 @@ Ansatz defaults to `TwoLocal` (RY + RZ rotations, CX entanglement).
 
 ### JSON output schema
 
-Every run writes a timestamped JSON to `results/<backend>/<backend>_<YYYYMMDD_HHMMSS>.json`.
+Every run writes a timestamped JSON to
+`results/<hardware-slug>/<category>/<backend>_<YYYYMMDD_HHMMSS>.json`.
+`<hardware-slug>` is derived from `nvidia-smi` by
+`HardwareProfile.results_slug()` (e.g. `a100-sxm4-40gb`,
+`rtx-6000-ada-generation`, or `cpu-only` with no GPU) — results from
+different hardware are always routed to sibling folders, never mixed. See
+[`results/README.md`](../results/README.md) for the full layout and the
+per-hardware folder index.
 
-**Simulator output** (`results/simulator/simulator_*.json`):
+**Simulator output** (`results/<hardware-slug>/simulator/simulator_*.json`):
 
     {
       "timestamp": "2026-08-06T14:00:03",
@@ -354,7 +373,7 @@ Every run writes a timestamped JSON to `results/<backend>/<backend>_<YYYYMMDD_HH
       "weak_scaling": {"ranks": 2, "wall_time": 1.05, ...}
     }
 
-**IBM output** (`results/ibm/ibm_cloud_*.json`):
+**IBM output** (`results/<hardware-slug>/ibm/ibm_cloud_*.json`):
 
     {
       "timestamp": "2026-07-27T22:01:30",
@@ -462,7 +481,8 @@ registry pattern; see [`docs/FUTURE_WORK.md`](FUTURE_WORK.md) for details.
     make trial NP=2         # ~5 min, expect: Tests passed: 7 / 7
     make run NP=2           # full 4-molecule benchmark
 
-Output lands in `results/simulator/simulator_<timestamp>.json`. On a laptop
+Output lands in `results/cpu-only/simulator/simulator_<timestamp>.json` (or
+`results/<hardware-slug>/simulator/...` if a GPU is detected). On a laptop
 with no CUDA-capable GPU, the stack transparently falls back to
 `aer_cpu` — the run completes but is slower.
 
@@ -512,7 +532,7 @@ check will warn if you exceed the rank-adjusted budget.
 
 Uses EstimatorV2 with `mode=backend` (open-plan compatible),
 4096 shots, T-REx measurement error mitigation. Results go to
-`results/ibm/ibm_cloud_<timestamp>.json`.
+`results/<hardware-slug>/ibm/ibm_cloud_<timestamp>.json`.
 
 ### Tutorial 6 — Distributed via Slurm on an HPC cluster
 

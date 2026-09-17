@@ -1,0 +1,43 @@
+{
+  "hostname": "6adc2996704c",
+  "timestamp": "20260903_225112",
+  "molecules": {
+    "BeH2": {
+      "energy": -15.555709,
+      "fci": -15.5951,
+      "error": 0.0394,
+      "wall_time": 200.887,
+      "iterations": 896,
+      "best_iter": 261,
+      "num_qubits": 14,
+      "num_pauli": 666,
+      "num_params": 112,
+      "ansatz_tier": "hwe_adaptive"
+    },
+    "H2O": {
+      "energy": -74.792123,
+      "fci": -75.0124,
+      "error": 0.2203,
+      "wall_time": 257.469,
+      "iterations": 896,
+      "best_iter": 37,
+      "num_qubits": 14,
+      "num_pauli": 1086,
+      "num_params": 112,
+      "ansatz_tier": "hwe_adaptive"
+    },
+    "NH3": {
+      "energy": -54.967258,
+      "fci": -55.5183,
+      "error": 0.551,
+      "wall_time": 1769.645,
+      "iterations": 1024,
+      "best_iter": 49,
+      "num_qubits": 16,
+      "num_pauli": 3057,
+      "num_params": 128,
+      "ansatz_tier": "hwe_adaptive"
+    }
+  },
+  "_note": "Reconstructed from log \u2014 N2 killed mid-loop, JSON never wrote. See serial_baseline_20260903_225112.log for provenance."
+}
