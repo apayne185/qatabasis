@@ -114,10 +114,14 @@ scaling:
 	@echo "[Make] Scaling logs saved to results/scaling/. Check T_total and M-metric."
 
 # WEAK SCALING SWEEP - problem size grows with P
+# P=16 added for NH3 (see local_test_run.py:run_weak_scaling). N2 has no
+# tier -- would need P=32 on the same single Docker host as everything
+# else, deeper into the shared-memory contention regime than any other
+# scaling data in the paper goes; deliberately left out, disclosed in text.
 weak-scaling:
 	@echo "[Make] Starting weak scaling analysis ..."
 	@mkdir -p results/scaling
-	@for p in 1 2 4 8; do \
+	@for p in 1 2 4 8 16; do \
 	  echo "  Running P=$$p (weak scaling) ..."; \
 	  docker run --rm \
 	    $(GPU_FLAG) \

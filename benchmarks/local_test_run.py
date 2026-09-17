@@ -183,12 +183,20 @@ def run_scaling_local(stack: QatabasisStack):
 
 
 def run_weak_scaling(stack: QatabasisStack):
-    # Molecule scales with P so per-rank Pauli term count stays relatively constant
+    # Molecule scales with P so per-rank Pauli term count stays relatively constant.
+    # N2 (2951 terms) deliberately has no tier here -- it's close enough in size to
+    # NH3 that it would want the same P=16 slot, and going further to P=32 to give
+    # it its own slot pushes single-host MPI into a shared-memory-contention regime
+    # deeper than anything else in this paper's scaling story tests (strong scaling
+    # stops at P=8 for the same single-host reason -- see README.md's Known
+    # Limitations). N2 stays excluded from weak scaling; disclose this in the paper
+    # text the same way N2's strong-scaling exclusion is already disclosed.
     weak_scaling_map = {
         1: "H2",        # 15 terms / 1 rank  =15 terms/rank
         2: "LiH",        # 631 terms / 2 ranks = 316 terms/rank
         4: "BeH2",       # 666 terms / 4 ranks = 167 terms/rank
         8: "H2O",       # 1086 terms / 8 ranks = 136 terms/rank
+        16: "NH3",      # 3057 terms / 16 ranks = 191 terms/rank
     }
 
     mol_name = weak_scaling_map.get(stack.size)
