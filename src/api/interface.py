@@ -403,6 +403,27 @@ class QatabasisStack:
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        if exc_type is not None:
+            # An exception on THIS rank means every other rank is likely
+            # still waiting inside a collective call (comm.Bcast/Allreduce)
+            # that this rank will now never reach -- finalize_mpi() /
+            # MPI_Finalize() is itself collective, so calling it here would
+            # just add a second, different hang on top of the first. Abort
+            # the whole job instead of trying to finalize cleanly: a loud,
+            # immediate failure on every rank beats a silent, permanent
+            # deadlock with no error message (this was reachable from, e.g.,
+            # an IBM API error, a disk-full checkpoint write, or a missing
+            # IBM_QUANTUM_TOKEN raised only on rank 0 -- see
+            # _init_ibm_session()).
+            print(f"[Stack] rank {getattr(self, 'rank', '?')}: unhandled "
+                  f"{exc_type.__name__}: {exc_val} -- aborting all MPI ranks "
+                  f"rather than risk a silent hang in the other ranks' next "
+                  f"collective call.", file=sys.stderr, flush=True)
+            try:
+                self.comm.Abort(1)
+            except Exception:
+                pass
+            return False
         self.finalize()
 
     def finalize(self):
