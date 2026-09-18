@@ -360,6 +360,7 @@ per-hardware folder index.
       "molecules": {
         "H2": {
           "energy": -1.134896,
+          "unperturbed_energy": -1.134901,
           "fci": -1.13727,
           "iters": 200,
           "wall_time": 1.4,
@@ -372,6 +373,29 @@ per-hardware folder index.
       "scaling": {"ranks": 2, "wall_time": 0.68, ...},
       "weak_scaling": {"ranks": 2, "wall_time": 1.05, ...}
     }
+
+**`energy` vs. `unperturbed_energy` — which one to cite for accuracy claims:**
+
+- `energy` is the value SPSA itself used internally: `(E(θ+cₖδ) + E(θ-cₖδ)) / 2`
+  at whichever iteration was selected for reporting (either the final iteration,
+  or `_best_physical_energy` if the trajectory ended below the FCI reference).
+  This is the correct quantity for driving the optimizer, but it carries a small,
+  non-vanishing bias of order `cₖ²·tr(Hessian)/2` relative to the true energy at
+  that point — `cₖ` decays too slowly (`gamma=0.101`) to make this negligible
+  over a realistic run. **Do not cite `energy` alone as a chemical-accuracy
+  number without also reporting `unperturbed_energy`.**
+- `unperturbed_energy` is a single, separate, exact statevector evaluation of
+  `E(θ)` at the same `θ` that produced `energy` — computed once via
+  `QatabasisStack.evaluate_unperturbed_energy()` after the SPSA loop finishes,
+  not per-iteration. This is the reproducible number to use for any accuracy
+  claim against FCI. It costs one extra statevector build per molecule (not
+  per iteration), so it is cheap even for the larger benchmark molecules.
+- Both fields report the energy at the *same* `θ` — the only difference is
+  the perturbed-average vs. unperturbed evaluation of that one point. Neither
+  field is "the converged answer": both are still subject to whatever
+  iteration/seed selected `θ` in the first place (see `docs/API.md`'s
+  Aggregators section and `benchmarks/aggregate_seeds.py` for the multi-seed
+  statistics this feeds into).
 
 **IBM output** (`results/<hardware-slug>/ibm/ibm_cloud_*.json`):
 

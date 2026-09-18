@@ -551,6 +551,28 @@ class QatabasisStack:
         energy = sv.expectation_value(pauli_op).real
         return float(energy)
 
+    def evaluate_unperturbed_energy(self, problem, theta) -> float:
+        """Compute the exact, unperturbed E(theta) -- rank 0 only, no MPI needed.
+
+        Every per-iteration energy inside vqe_optimize() is
+        (E(theta+ck*delta) + E(theta-ck*delta)) / 2, SPSA's gradient-estimate
+        quantity, NOT E(theta) itself. That average has an expected bias of
+        +(ck^2/2)*tr(Hessian) that does not decay to zero over a realistic
+        run (ck ~ c/k^gamma with gamma=0.101 is still >50% of its initial
+        value after hundreds of iterations) -- it is the correct quantity
+        for driving the optimizer, but not a correct quantity to report as
+        "the energy" for accuracy claims.
+
+        Call this once, after vqe_optimize() returns, on the final theta (or
+        on _best_physical_theta if the run's final trajectory point is below
+        FCI) to get a real, reproducible, provenance-labeled energy for
+        accuracy reporting. Only rank 0 needs to call this -- it does not
+        touch MPI at all, so it's safe to call unconditionally on rank 0
+        after a distributed run finishes, using whichever theta you want to
+        re-evaluate.
+        """
+        return self._evaluate_statevector(problem, theta)
+
 
     def _init_ibm_session(self, problem):
         # Lazy-init - connect to IBM Quantum, transpile ansatz once, cache layout 

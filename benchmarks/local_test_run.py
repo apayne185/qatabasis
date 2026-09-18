@@ -56,12 +56,12 @@ def make_problem(molecule_input: str, force_tier: str|None= None)-> ChemistryPro
 
 
 
-def run_chemistry_local(stack: QatabasisStack, molecule_input: str, force_tier: str | None= None): 
+def run_chemistry_local(stack: QatabasisStack, molecule_input: str, force_tier: str | None= None):
     if stack.rank == 0: print(f"\n\n--- RUNNING CHEMISTRY TASK {molecule_input} ---")
 
     problem = make_problem(molecule_input, force_tier=force_tier)
     if problem is None:
-        return None, None, None
+        return None, None, None, None
     
     t0 = time.perf_counter()
     max_iters = int(MAX_ITERS_ENV) if MAX_ITERS_ENV else max(200, problem.num_params * 8)  # scale with parameter count
@@ -110,7 +110,7 @@ def run_chemistry_local(stack: QatabasisStack, molecule_input: str, force_tier: 
             for w in meta.get('warnings',[]):    
                 print(f"[{problem.name}] Note: {w}")
 
-    return history, problem, t_total   
+    return history, problem, t_total, theta   
 
 
 
@@ -266,19 +266,39 @@ if __name__ == "__main__":
     with QatabasisStack(use_gpu=USE_GPU, backend=BACKEND) as stack:
         results = {}
         for mol in MOLECULES:
-            history, problem, t_total = run_chemistry_local(stack, mol)
+            history, problem, t_total, theta = run_chemistry_local(stack, mol)
 
             if stack.rank == 0 and history:
                 if problem is not None:
                     fci = getattr(problem, "fci_energy", None)
                     final_e = history[-1]
                     best_phys = getattr(stack, '_best_physical_energy', None)
+                    best_phys_theta = getattr(stack, '_best_physical_theta', None)
                     if fci is not None and final_e < fci - 1e-6 and best_phys is not None:
                         report_e = best_phys
+                        report_theta = best_phys_theta
                     else:
                         report_e = final_e
+                        report_theta = theta
+
+                    # "energy" (report_e above) is the SPSA-internal perturbed-average
+                    # quantity -- (E(theta+ck*delta)+E(theta-ck*delta))/2 at whichever
+                    # iteration was selected, NOT a separately-verified E(theta). It
+                    # carries a small O(ck^2) bias that does not decay to zero over a
+                    # realistic run (see evaluate_unperturbed_energy()'s docstring in
+                    # src/api/interface.py). unperturbed_energy below is a genuine,
+                    # single exact statevector evaluation of report_theta -- this is
+                    # the reproducible, provenance-labeled number for accuracy claims.
+                    # Cheap: one extra statevector build, done once per molecule here,
+                    # not per-iteration.
+                    unperturbed_energy = (
+                        stack.evaluate_unperturbed_energy(problem, report_theta)
+                        if report_theta is not None else None
+                    )
+
                     results[mol] = {
                         "energy": report_e,
+                        "unperturbed_energy": unperturbed_energy,
                         "tier":getattr(problem, "ansatz_tier", "hwe"),
                         "score":problem.diagnostics.get("correlation_score", 0.0),
                         "fci": fci,
