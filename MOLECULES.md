@@ -11,12 +11,25 @@ problem = ChemistryProblem.from_name("H2")     # any name from the table below
 | Name | Formula | Electrons | Qubits | Pauli Terms | FCI Energy (Ha) | Ansatz Reps | Notes |
 |------|---------|-----------|--------|-------------|-----------------|-------------|-------|
 | `H2` | H₂ | 2 | 4 | 15 | -1.13727 | 1 | Fastest; ideal for testing and QPU runs |
-| `LiH` | LiH | 4 (2 active) | 12 | 631 | -7.8825 | 1 | Frozen 2 core electrons |
-| `BeH2` | BeH₂ | 6 (4 active) | 14 | 666 | -15.5952 | 2 | Frozen 2 core electrons |
-| `H2O` | H₂O | 10 (8 active) | 14 | 1086 | -75.0129 | 2 | Frozen 2 core electrons |
+| `LiH` | LiH | 4 | 12 | 631 | -7.8825 | 1 | Full active space (no core-electron freezing — see note below) |
+| `BeH2` | BeH₂ | 6 | 14 | 666 | -15.5952 | 2 | Full active space (no core-electron freezing — see note below) |
+| `H2O` | H₂O | 10 | 14 | 1086 | -75.0129 | 2 | Full active space (no core-electron freezing — see note below) |
 | `NH3` | NH₃ | 10 | 16 | 3057 | -55.4546 | 3 | NISQ upper limit; long runtime |
 | `N2` | N₂ | 14 | 20 | 2951 | -108.9544 | 2 | GPU crossover test (see `docs/GPU_EXPECTATION_FIX.md`) |
 | `CO2` | CO₂ | 22 | 30 | ~16,170 | -187.6 | 1 | Ceiling test only, not a convergence run — 16k Pauli terms × default `MAX_ITERS` is a multi-day run; always pair with `MAX_ITERS<=10` |
+
+**On "full active space" above**: all molecules built via `ChemistryProblem.from_name()` /
+`ChemistryProblem.prepare()` — the path every benchmark and published result uses — run
+the complete, untruncated STO-3G active space via `PySCFDriver` with no
+`FreezeCoreTransformer`/`ActiveSpaceTransformer` applied. `MoleculeResolver.resolve(...,
+freeze_core=True)` computes what a *reduced* active space's electron/qubit count would
+be, but that computation only feeds `ResolutionResult.active_electrons` /
+`estimated_qubits` (metadata/logging fields) — it is never applied to the actual
+Hamiltonian construction. Confirmed: LiH's real, published qubit count (12) matches the
+full 6-spatial-orbital STO-3G space exactly, not the freeze-core-reduced 10-qubit
+estimate. If active-space reduction is wanted for a future molecule/basis, it would need
+a real `FreezeCoreTransformer` wired into `ChemistryProblem.prepare()` — this does not
+exist yet anywhere in the codebase.
 
 All use the **STO-3G** minimal basis set. FCI energies are computed with PySCF Full Configuration Interaction.
 

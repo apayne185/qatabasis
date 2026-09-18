@@ -297,15 +297,28 @@ Location: [`src/api/molecule_resolver.py`](../src/api/molecule_resolver.py)
         cache_dir: str | None = None,
     )
 
-Raise `MoleculeTooBigError` for anything exceeding `max_qubits` after
-active-space reduction. `local_test_run.py` uses `max_qubits=30` to
-accommodate ceiling tests up to CO₂.
+Raise `MoleculeTooBigError` for anything exceeding `max_qubits`, checked
+against `estimated_qubits` (see below). `local_test_run.py` uses
+`max_qubits=30` to accommodate ceiling tests up to CO₂.
 
 #### `resolve(molecule_input, freeze_core=True) -> ResolutionResult`
 
 Returns a `ResolutionResult` dataclass with `geometry`, `source`,
 `total_electrons`, `active_electrons`, `estimated_qubits`, `freeze_core`,
 and metadata.
+
+**Important**: `freeze_core` only affects the `active_electrons` /
+`estimated_qubits` *estimate* stored on `ResolutionResult` (used for the
+`max_qubits` check above and for informational log lines) — it is not
+applied to the actual Hamiltonian. `ChemistryProblem.prepare()` (called by
+`ResolutionResult.to_chemistry_problem()`) always builds the full,
+untruncated active space via `PySCFDriver` with no
+`FreezeCoreTransformer`/`ActiveSpaceTransformer` in the pipeline. If
+`freeze_core=True` predicts a smaller qubit count than the molecule's real
+qubit count, `estimated_qubits` will *undercount* what `ChemistryProblem`
+actually produces — verify against `problem.num_qubits` after `prepare()`
+for the real value, don't rely on `estimated_qubits` alone for anything
+qubit-budget-critical.
 
 #### `resolve_batch(molecules: list[str], freeze_core=True) -> dict[str, ResolutionResult | None]`
 
