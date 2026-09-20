@@ -49,6 +49,7 @@ are needed to switch hardware, backends, or workloads.
 | `IBM_QUANTUM_BACKEND` | backend name | (required for `ibm_cloud`) | e.g. `ibm_marrakesh`, `ibm_torino`, `ibm_kyiv` |
 | `VQE_LEGACY_EXPECT` | `1` \| unset | unset | Force the legacy CPU-side expectation path (GPU→CPU statevector copy + numpy) even at `NP=1`, where the GPU-native path is normally faster. Useful for A/B measurement or regression checks. |
 | `VQE_GPU_EXPECT_MPI` | `1` \| unset | unset | Force the GPU-native expectation path (`save_expectation_value`) even under MPI at `NP>=2`, where it is **not** the default due to a measured 3.6x per-iteration regression (per-rank Aer transpile cost amplifies when multiple ranks contend for one GPU). Only for validating a future fix — do not use for published results until that regression is resolved. |
+| `VQE_ACCEPT_COST` | `1` \| unset | unset | Required to proceed when the compute-cost pre-flight check (`vqe_optimize()`'s LARGE-COST WARNING) fires — i.e. per-iteration amplitude-touch cost exceeds ~1e11 (`2^num_qubits × n_pauli_terms`) or total Pauli evaluations exceed ~1e10. Without this set, the run aborts (all ranks, cleanly, before any real work starts) rather than silently committing to a many-hours-per-iteration run. Reducing `MAX_ITERS` alone does **not** avoid this — it only lowers total work, not per-iteration cost (e.g. CO2 at 30 qubits triggers this regardless of `MAX_ITERS`; see Tutorial 4 below). |
 
 **GPU-native vs. legacy expectation routing**: the stack picks between two
 ways of computing Pauli expectation values on GPU (`_expectation_on_gpu` vs.
@@ -297,15 +298,28 @@ Location: [`src/api/molecule_resolver.py`](../src/api/molecule_resolver.py)
         cache_dir: str | None = None,
     )
 
-Raise `MoleculeTooBigError` for anything exceeding `max_qubits` after
-active-space reduction. `local_test_run.py` uses `max_qubits=30` to
-accommodate ceiling tests up to CO₂.
+Raise `MoleculeTooBigError` for anything exceeding `max_qubits`, checked
+against `estimated_qubits` (see below). `local_test_run.py` uses
+`max_qubits=30` to accommodate ceiling tests up to CO₂.
 
 #### `resolve(molecule_input, freeze_core=True) -> ResolutionResult`
 
 Returns a `ResolutionResult` dataclass with `geometry`, `source`,
 `total_electrons`, `active_electrons`, `estimated_qubits`, `freeze_core`,
 and metadata.
+
+**Important**: `freeze_core` only affects the `active_electrons` /
+`estimated_qubits` *estimate* stored on `ResolutionResult` (used for the
+`max_qubits` check above and for informational log lines) — it is not
+applied to the actual Hamiltonian. `ChemistryProblem.prepare()` (called by
+`ResolutionResult.to_chemistry_problem()`) always builds the full,
+untruncated active space via `PySCFDriver` with no
+`FreezeCoreTransformer`/`ActiveSpaceTransformer` in the pipeline. If
+`freeze_core=True` predicts a smaller qubit count than the molecule's real
+qubit count, `estimated_qubits` will *undercount* what `ChemistryProblem`
+actually produces — verify against `problem.num_qubits` after `prepare()`
+for the real value, don't rely on `estimated_qubits` alone for anything
+qubit-budget-critical.
 
 #### `resolve_batch(molecules: list[str], freeze_core=True) -> dict[str, ResolutionResult | None]`
 
@@ -360,6 +374,7 @@ per-hardware folder index.
       "molecules": {
         "H2": {
           "energy": -1.134896,
+          "unperturbed_energy": -1.134901,
           "fci": -1.13727,
           "iters": 200,
           "wall_time": 1.4,
@@ -372,6 +387,29 @@ per-hardware folder index.
       "scaling": {"ranks": 2, "wall_time": 0.68, ...},
       "weak_scaling": {"ranks": 2, "wall_time": 1.05, ...}
     }
+
+**`energy` vs. `unperturbed_energy` — which one to cite for accuracy claims:**
+
+- `energy` is the value SPSA itself used internally: `(E(θ+cₖδ) + E(θ-cₖδ)) / 2`
+  at whichever iteration was selected for reporting (either the final iteration,
+  or `_best_physical_energy` if the trajectory ended below the FCI reference).
+  This is the correct quantity for driving the optimizer, but it carries a small,
+  non-vanishing bias of order `cₖ²·tr(Hessian)/2` relative to the true energy at
+  that point — `cₖ` decays too slowly (`gamma=0.101`) to make this negligible
+  over a realistic run. **Do not cite `energy` alone as a chemical-accuracy
+  number without also reporting `unperturbed_energy`.**
+- `unperturbed_energy` is a single, separate, exact statevector evaluation of
+  `E(θ)` at the same `θ` that produced `energy` — computed once via
+  `QatabasisStack.evaluate_unperturbed_energy()` after the SPSA loop finishes,
+  not per-iteration. This is the reproducible number to use for any accuracy
+  claim against FCI. It costs one extra statevector build per molecule (not
+  per iteration), so it is cheap even for the larger benchmark molecules.
+- Both fields report the energy at the *same* `θ` — the only difference is
+  the perturbed-average vs. unperturbed evaluation of that one point. Neither
+  field is "the converged answer": both are still subject to whatever
+  iteration/seed selected `θ` in the first place (see `docs/API.md`'s
+  Aggregators section and `benchmarks/aggregate_seeds.py` for the multi-seed
+  statistics this feeds into).
 
 **IBM output** (`results/<hardware-slug>/ibm/ibm_cloud_*.json`):
 
@@ -514,7 +552,13 @@ publication-grade statistics.
 ### Tutorial 4 — Hardware ceiling test (bigger molecule than the defaults)
 
     # Registry already has N2 (20q) and CO2 (30q)
-    MOLECULES="CO2" MAX_ITERS=10 make run NP=1
+    # VQE_ACCEPT_COST=1 is required here: the pre-flight cost check aborts
+    # by default once per-iteration amplitude-touch cost exceeds ~1e11
+    # (CO2's 2^30 * 16170 Pauli terms is ~1.7e13, well over that regardless
+    # of MAX_ITERS -- reducing iterations lowers total work, not per-iter
+    # cost). This is a deliberate, informed override for a known ceiling
+    # test, not a general-purpose flag to silence the warning.
+    VQE_ACCEPT_COST=1 MOLECULES="CO2" MAX_ITERS=10 make run NP=1
 
 `NP=1` matters at 30 qubits: at fp64 the statevector is 16 GB, and two
 ranks sharing one 40 GB GPU (default `NP=2`) would each build their own

@@ -176,6 +176,13 @@ def aggregate(runs: list[dict]) -> dict[str, dict]:
             by_mol.setdefault(mol, []).append({
                 "seed": seed,
                 "energy": data["energy"],
+                # unperturbed_energy is None for JSONs predating this field
+                # (the SPSA perturbed-average bias fix) -- callers that need
+                # an accuracy-grade number should prefer this over "energy"
+                # when present, and fall back to "energy" with a caveat
+                # otherwise. See docs/API.md's "energy vs unperturbed_energy"
+                # note for why the two differ.
+                "unperturbed_energy": data.get("unperturbed_energy"),
                 "fci": data.get("fci"),
                 "wall_time": data.get("wall_time"),
                 "iters": data.get("iters"),
@@ -187,6 +194,7 @@ def aggregate(runs: list[dict]) -> dict[str, dict]:
             by_mol.setdefault(mol, []).append({
                 "seed": seed,
                 "energy": chem["energy"],
+                "unperturbed_energy": chem.get("unperturbed_energy"),
                 "fci": chem.get("fci"),
                 "wall_time": chem.get("wall_time"),
                 "iters": chem.get("iterations"),
@@ -211,7 +219,19 @@ def report(by_mol: dict[str, list[dict]]) -> None:
 
     for mol, runs in sorted(by_mol.items()):
         seeds = sorted({r["seed"] for r in runs})
-        energies = [r["energy"] for r in runs]
+        # Prefer unperturbed_energy (a real, separate E(theta) evaluation) for
+        # accuracy reporting when present; "energy" is SPSA's own internal
+        # perturbed-average quantity and carries a small, non-vanishing O(ck^2)
+        # bias -- see docs/API.md's "energy vs unperturbed_energy" note. Falls
+        # back to "energy" for older JSONs that predate this field, but flags
+        # that fallback explicitly rather than silently mixing the two.
+        has_unperturbed = [r.get("unperturbed_energy") is not None for r in runs]
+        use_unperturbed = all(has_unperturbed) if runs else False
+        mixed_sources = any(has_unperturbed) and not use_unperturbed
+        energies = [
+            (r["unperturbed_energy"] if use_unperturbed else r["energy"])
+            for r in runs
+        ]
         fci = next((r["fci"] for r in runs if r["fci"] is not None), None)
         wts = [r["wall_time"] for r in runs if r["wall_time"]]
 
@@ -226,27 +246,31 @@ def report(by_mol: dict[str, list[dict]]) -> None:
             best_rows.append({
                 "mol": mol, "seed": runs[best_idx]["seed"], "energy": energies[best_idx],
                 "fci": fci, "err": errs[best_idx], "n": len(runs),
+                "source": "unperturbed" if use_unperturbed else "SPSA-perturbed (no unperturbed_energy in JSON)",
             })
         else:
             err_str = "N/A"
 
         med_t = statistics.median(wts) if wts else 0.0
+        source_flag = "" if use_unperturbed else (
+            " [MIXED old+new data]" if mixed_sources else " [SPSA-perturbed]"
+        )
 
         print(f"{mol:<8} {len(runs):<3} {str(seeds):<20} "
               f"{med_e:<16.6f} {e_range:<22} "
-              f"{err_str:<18} {med_t:<14.2f}")
+              f"{err_str:<18} {med_t:<14.2f}{source_flag}")
 
     if best_rows:
         print(f"\nBest-of-N (min |error| vs FCI among the seeds above; report this per-molecule "
               f"as \"best of n=<seed count> independent SPSA trajectories\" (see n column above), "
               f"not as typical performance):")
         print(f"{'Molecule':<8} {'Best seed':<10} {'Energy (Ha)':<16} "
-              f"{'FCI (Ha)':<14} {'|err| (Ha)':<12} {'Chem. acc.?':<12}")
+              f"{'FCI (Ha)':<14} {'|err| (Ha)':<12} {'Chem. acc.?':<12} {'Source'}")
         print("-" * 76)
         for r in best_rows:
             chem_acc = "YES" if r["err"] < 1.6e-3 else ("near" if r["err"] < 0.01 else "no")
             print(f"{r['mol']:<8} {r['seed']:<10} {r['energy']:<16.6f} "
-                  f"{r['fci']:<14.4f} {r['err']:<12.4f} {chem_acc:<12}")
+                  f"{r['fci']:<14.4f} {r['err']:<12.4f} {chem_acc:<12} {r['source']}")
 
     print("\nNotes:")
     print(" - Median is taken across SPSA random seeds at fixed hyperparameters.")

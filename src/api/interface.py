@@ -216,9 +216,9 @@ class QatabasisStack:
                 )
 
             # Compute-cost pre-flight: SPSA needs 2 statevector builds per iter, and each
-            # rank evaluates its Pauli-term slice against that statevector. Blocks the
-            # exact CO2 failure mode -- 16k Pauli terms * 240 params * default max_iters
-            # would silently commit to a multi-hour run at $$$/hr. See gap H in
+            # rank evaluates its Pauli-term slice against that statevector. Warns about
+            # the exact CO2 failure mode -- 16k Pauli terms * 240 params * default max_iters
+            # would otherwise commit to a multi-hour run at $$$/hr. See gap H in
             # docs/KNOWN_GAPS.md: only Pauli evaluation is distributed, statevector
             # construction is redundant per rank.
             n_pauli = len(problem.pauli_terms)
@@ -236,6 +236,33 @@ class QatabasisStack:
                     f"safely mid-iter. Consider MAX_ITERS<=10 for ceiling tests, reps=1 to "
                     f"halve params, or wait for distributed statevector (docs/FUTURE_WORK.md #2)."
                 )
+                self._large_cost_pending = True
+            else:
+                self._large_cost_pending = False
+        else:
+            self._large_cost_pending = False
+
+        # The warning above used to only print and continue -- despite the code
+        # comment claiming it "blocks the exact CO2 failure mode," nothing in
+        # the control flow actually stopped execution. Gate on an explicit,
+        # rank-uniform opt-in instead: rank 0's decision is broadcast so every
+        # rank agrees on whether to proceed (matches this run's earlier
+        # rank-agreement fix in make_problem() -- an abort/continue decision
+        # that only some ranks take would itself cause a divergent-collective
+        # hang, the same failure mode this is trying to prevent).
+        _large_cost_flag = np.array([1 if getattr(self, "_large_cost_pending", False) else 0], dtype=np.int32)
+        comm.Bcast(_large_cost_flag, root=0)
+        if _large_cost_flag[0] and os.environ.get("VQE_ACCEPT_COST", "").strip() not in {"1", "yes", "true"}:
+            if self.rank == 0:
+                print(
+                    "[Stack] Refusing to start: set VQE_ACCEPT_COST=1 to proceed "
+                    "anyway once you've reviewed the LARGE-COST WARNING above."
+                )
+            raise RuntimeError(
+                "vqe_optimize() aborted by the compute-cost pre-flight check "
+                "(see the LARGE-COST WARNING printed on rank 0). Set "
+                "VQE_ACCEPT_COST=1 to proceed anyway."
+            )
 
         os.makedirs(checkpoint_dir, exist_ok=True)
         theta = np.zeros(num_params, dtype=np.float64)
@@ -403,6 +430,27 @@ class QatabasisStack:
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        if exc_type is not None:
+            # An exception on THIS rank means every other rank is likely
+            # still waiting inside a collective call (comm.Bcast/Allreduce)
+            # that this rank will now never reach -- finalize_mpi() /
+            # MPI_Finalize() is itself collective, so calling it here would
+            # just add a second, different hang on top of the first. Abort
+            # the whole job instead of trying to finalize cleanly: a loud,
+            # immediate failure on every rank beats a silent, permanent
+            # deadlock with no error message (this was reachable from, e.g.,
+            # an IBM API error, a disk-full checkpoint write, or a missing
+            # IBM_QUANTUM_TOKEN raised only on rank 0 -- see
+            # _init_ibm_session()).
+            print(f"[Stack] rank {getattr(self, 'rank', '?')}: unhandled "
+                  f"{exc_type.__name__}: {exc_val} -- aborting all MPI ranks "
+                  f"rather than risk a silent hang in the other ranks' next "
+                  f"collective call.", file=sys.stderr, flush=True)
+            try:
+                self.comm.Abort(1)
+            except Exception:
+                pass
+            return False
         self.finalize()
 
     def finalize(self):
@@ -551,6 +599,28 @@ class QatabasisStack:
         energy = sv.expectation_value(pauli_op).real
         return float(energy)
 
+    def evaluate_unperturbed_energy(self, problem, theta) -> float:
+        """Compute the exact, unperturbed E(theta) -- rank 0 only, no MPI needed.
+
+        Every per-iteration energy inside vqe_optimize() is
+        (E(theta+ck*delta) + E(theta-ck*delta)) / 2, SPSA's gradient-estimate
+        quantity, NOT E(theta) itself. That average has an expected bias of
+        +(ck^2/2)*tr(Hessian) that does not decay to zero over a realistic
+        run (ck ~ c/k^gamma with gamma=0.101 is still >50% of its initial
+        value after hundreds of iterations) -- it is the correct quantity
+        for driving the optimizer, but not a correct quantity to report as
+        "the energy" for accuracy claims.
+
+        Call this once, after vqe_optimize() returns, on the final theta (or
+        on _best_physical_theta if the run's final trajectory point is below
+        FCI) to get a real, reproducible, provenance-labeled energy for
+        accuracy reporting. Only rank 0 needs to call this -- it does not
+        touch MPI at all, so it's safe to call unconditionally on rank 0
+        after a distributed run finishes, using whichever theta you want to
+        re-evaluate.
+        """
+        return self._evaluate_statevector(problem, theta)
+
 
     def _init_ibm_session(self, problem):
         # Lazy-init - connect to IBM Quantum, transpile ansatz once, cache layout 
@@ -681,7 +751,43 @@ class QatabasisStack:
         result_buf = np.zeros(6, dtype=np.float64)              # [e+_qpu, e-_qpu, M, t_quant, e+_sv, e-_sv]
 
         if self.rank == 0:
-            job_result = job.result()
+            # job.result() has no built-in timeout in qiskit-ibm-runtime, and
+            # every other rank is already past its last collective call
+            # (comm.Allreduce above) by the time we get here -- an IBM job
+            # stuck in QUEUED, or a dropped connection that never resolves,
+            # would block this rank forever with the others waiting on
+            # nothing. Same 1200s (20 min) budget as the C++ QPU client's
+            # own timeout (qpu_client.cpp:202) for consistency. Run the
+            # blocking call in a background thread so a timeout can
+            # actually interrupt the wait; on timeout, raise so __exit__'s
+            # comm.Abort() (see class docstring / __exit__) tears down
+            # every rank instead of leaving them all hung.
+            import concurrent.futures as _futures
+            _IBM_JOB_TIMEOUT_S = 1200
+            # Deliberately NOT a `with` block: ThreadPoolExecutor.__exit__
+            # calls shutdown(wait=True) by default, which blocks until the
+            # background thread finishes -- exactly what we're trying to
+            # avoid if job.result() is genuinely stuck rather than just
+            # slow. shutdown(wait=False) below returns immediately instead.
+            # Note this can't forcibly kill the underlying network call --
+            # Python threads aren't killable -- so on a real timeout the
+            # HTTP request keeps running in the background until it
+            # naturally resolves or the process exits; we just stop
+            # blocking on it here rather than waiting for that to happen.
+            _pool = _futures.ThreadPoolExecutor(max_workers=1)
+            _future = _pool.submit(job.result)
+            try:
+                job_result = _future.result(timeout=_IBM_JOB_TIMEOUT_S)
+            except _futures.TimeoutError:
+                _pool.shutdown(wait=False)
+                raise TimeoutError(
+                    f"[IBM] job {job.job_id()} did not complete within "
+                    f"{_IBM_JOB_TIMEOUT_S}s -- aborting rather than "
+                    f"blocking indefinitely while other MPI ranks wait. "
+                    f"Check the job status at quantum.ibm.com; it may "
+                    f"still complete after this process exits."
+                )
+            _pool.shutdown(wait=False)
             t_qpu = _time.perf_counter() - t_qpu_start
 
             e_plus_qpu = float(job_result[0].data.evs)
