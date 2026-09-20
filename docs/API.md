@@ -49,6 +49,7 @@ are needed to switch hardware, backends, or workloads.
 | `IBM_QUANTUM_BACKEND` | backend name | (required for `ibm_cloud`) | e.g. `ibm_marrakesh`, `ibm_torino`, `ibm_kyiv` |
 | `VQE_LEGACY_EXPECT` | `1` \| unset | unset | Force the legacy CPU-side expectation path (GPU→CPU statevector copy + numpy) even at `NP=1`, where the GPU-native path is normally faster. Useful for A/B measurement or regression checks. |
 | `VQE_GPU_EXPECT_MPI` | `1` \| unset | unset | Force the GPU-native expectation path (`save_expectation_value`) even under MPI at `NP>=2`, where it is **not** the default due to a measured 3.6x per-iteration regression (per-rank Aer transpile cost amplifies when multiple ranks contend for one GPU). Only for validating a future fix — do not use for published results until that regression is resolved. |
+| `VQE_ACCEPT_COST` | `1` \| unset | unset | Required to proceed when the compute-cost pre-flight check (`vqe_optimize()`'s LARGE-COST WARNING) fires — i.e. per-iteration amplitude-touch cost exceeds ~1e11 (`2^num_qubits × n_pauli_terms`) or total Pauli evaluations exceed ~1e10. Without this set, the run aborts (all ranks, cleanly, before any real work starts) rather than silently committing to a many-hours-per-iteration run. Reducing `MAX_ITERS` alone does **not** avoid this — it only lowers total work, not per-iteration cost (e.g. CO2 at 30 qubits triggers this regardless of `MAX_ITERS`; see Tutorial 4 below). |
 
 **GPU-native vs. legacy expectation routing**: the stack picks between two
 ways of computing Pauli expectation values on GPU (`_expectation_on_gpu` vs.
@@ -551,7 +552,13 @@ publication-grade statistics.
 ### Tutorial 4 — Hardware ceiling test (bigger molecule than the defaults)
 
     # Registry already has N2 (20q) and CO2 (30q)
-    MOLECULES="CO2" MAX_ITERS=10 make run NP=1
+    # VQE_ACCEPT_COST=1 is required here: the pre-flight cost check aborts
+    # by default once per-iteration amplitude-touch cost exceeds ~1e11
+    # (CO2's 2^30 * 16170 Pauli terms is ~1.7e13, well over that regardless
+    # of MAX_ITERS -- reducing iterations lowers total work, not per-iter
+    # cost). This is a deliberate, informed override for a known ceiling
+    # test, not a general-purpose flag to silence the warning.
+    VQE_ACCEPT_COST=1 MOLECULES="CO2" MAX_ITERS=10 make run NP=1
 
 `NP=1` matters at 30 qubits: at fp64 the statevector is 16 GB, and two
 ranks sharing one 40 GB GPU (default `NP=2`) would each build their own

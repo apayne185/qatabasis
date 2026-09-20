@@ -72,8 +72,11 @@ To make the comparison apples-to-apples:
   hpchybrid path, unfair comparison to distributed-SV Aer-MPI; (2) at 16k
   Pauli terms × 240 params it would dominate the wall-clock budget for
   the whole comparison. Run CO2 separately via
-  `VQE_PRECISION=fp32 MOLECULES=CO2 MAX_ITERS=10 NP=1 make run` — see the
-  LARGE-COST WARNING added to `src/api/interface.py` (2026-08-30) and the
+  `VQE_ACCEPT_COST=1 VQE_PRECISION=fp32 MOLECULES=CO2 MAX_ITERS=10 NP=1 make run`
+  (the pre-flight cost check now aborts by default above ~1e11
+  amplitude-touches/iteration — CO2 is always over this regardless of
+  `MAX_ITERS`, so the explicit opt-in is required) — see the
+  LARGE-COST WARNING in `src/api/interface.py` and the
   CO2 section in `docs/AWS_DEPLOYMENT.md`.
 - **Ansatz**: same HWE tier, same layer count. Pennylane version has to be
   hand-built to match; Qiskit versions share `AnsatzBuilder`.

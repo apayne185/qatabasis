@@ -216,9 +216,9 @@ class QatabasisStack:
                 )
 
             # Compute-cost pre-flight: SPSA needs 2 statevector builds per iter, and each
-            # rank evaluates its Pauli-term slice against that statevector. Blocks the
-            # exact CO2 failure mode -- 16k Pauli terms * 240 params * default max_iters
-            # would silently commit to a multi-hour run at $$$/hr. See gap H in
+            # rank evaluates its Pauli-term slice against that statevector. Warns about
+            # the exact CO2 failure mode -- 16k Pauli terms * 240 params * default max_iters
+            # would otherwise commit to a multi-hour run at $$$/hr. See gap H in
             # docs/KNOWN_GAPS.md: only Pauli evaluation is distributed, statevector
             # construction is redundant per rank.
             n_pauli = len(problem.pauli_terms)
@@ -236,6 +236,33 @@ class QatabasisStack:
                     f"safely mid-iter. Consider MAX_ITERS<=10 for ceiling tests, reps=1 to "
                     f"halve params, or wait for distributed statevector (docs/FUTURE_WORK.md #2)."
                 )
+                self._large_cost_pending = True
+            else:
+                self._large_cost_pending = False
+        else:
+            self._large_cost_pending = False
+
+        # The warning above used to only print and continue -- despite the code
+        # comment claiming it "blocks the exact CO2 failure mode," nothing in
+        # the control flow actually stopped execution. Gate on an explicit,
+        # rank-uniform opt-in instead: rank 0's decision is broadcast so every
+        # rank agrees on whether to proceed (matches this run's earlier
+        # rank-agreement fix in make_problem() -- an abort/continue decision
+        # that only some ranks take would itself cause a divergent-collective
+        # hang, the same failure mode this is trying to prevent).
+        _large_cost_flag = np.array([1 if getattr(self, "_large_cost_pending", False) else 0], dtype=np.int32)
+        comm.Bcast(_large_cost_flag, root=0)
+        if _large_cost_flag[0] and os.environ.get("VQE_ACCEPT_COST", "").strip() not in {"1", "yes", "true"}:
+            if self.rank == 0:
+                print(
+                    "[Stack] Refusing to start: set VQE_ACCEPT_COST=1 to proceed "
+                    "anyway once you've reviewed the LARGE-COST WARNING above."
+                )
+            raise RuntimeError(
+                "vqe_optimize() aborted by the compute-cost pre-flight check "
+                "(see the LARGE-COST WARNING printed on rank 0). Set "
+                "VQE_ACCEPT_COST=1 to proceed anyway."
+            )
 
         os.makedirs(checkpoint_dir, exist_ok=True)
         theta = np.zeros(num_params, dtype=np.float64)
