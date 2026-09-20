@@ -724,7 +724,43 @@ class QatabasisStack:
         result_buf = np.zeros(6, dtype=np.float64)              # [e+_qpu, e-_qpu, M, t_quant, e+_sv, e-_sv]
 
         if self.rank == 0:
-            job_result = job.result()
+            # job.result() has no built-in timeout in qiskit-ibm-runtime, and
+            # every other rank is already past its last collective call
+            # (comm.Allreduce above) by the time we get here -- an IBM job
+            # stuck in QUEUED, or a dropped connection that never resolves,
+            # would block this rank forever with the others waiting on
+            # nothing. Same 1200s (20 min) budget as the C++ QPU client's
+            # own timeout (qpu_client.cpp:202) for consistency. Run the
+            # blocking call in a background thread so a timeout can
+            # actually interrupt the wait; on timeout, raise so __exit__'s
+            # comm.Abort() (see class docstring / __exit__) tears down
+            # every rank instead of leaving them all hung.
+            import concurrent.futures as _futures
+            _IBM_JOB_TIMEOUT_S = 1200
+            # Deliberately NOT a `with` block: ThreadPoolExecutor.__exit__
+            # calls shutdown(wait=True) by default, which blocks until the
+            # background thread finishes -- exactly what we're trying to
+            # avoid if job.result() is genuinely stuck rather than just
+            # slow. shutdown(wait=False) below returns immediately instead.
+            # Note this can't forcibly kill the underlying network call --
+            # Python threads aren't killable -- so on a real timeout the
+            # HTTP request keeps running in the background until it
+            # naturally resolves or the process exits; we just stop
+            # blocking on it here rather than waiting for that to happen.
+            _pool = _futures.ThreadPoolExecutor(max_workers=1)
+            _future = _pool.submit(job.result)
+            try:
+                job_result = _future.result(timeout=_IBM_JOB_TIMEOUT_S)
+            except _futures.TimeoutError:
+                _pool.shutdown(wait=False)
+                raise TimeoutError(
+                    f"[IBM] job {job.job_id()} did not complete within "
+                    f"{_IBM_JOB_TIMEOUT_S}s -- aborting rather than "
+                    f"blocking indefinitely while other MPI ranks wait. "
+                    f"Check the job status at quantum.ibm.com; it may "
+                    f"still complete after this process exits."
+                )
+            _pool.shutdown(wait=False)
             t_qpu = _time.perf_counter() - t_qpu_start
 
             e_plus_qpu = float(job_result[0].data.evs)
