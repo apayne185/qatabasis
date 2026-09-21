@@ -133,20 +133,37 @@ existing `save_results()` schema plus a `baseline_backend` field so
 - Scaling behavior — this is NP=2 only. Full scaling replication under the
   baseline backends is deferred until the pattern above is validated.
 
-## Execution plan (when cloud GPU access returns)
+## Execution plan (Docker path — matches how this comparison actually runs)
 
 Estimated cost: ~$5 on a 1-hour Lambda A100 instance.
 
-1. Bootstrap Lambda instance per existing `install_native.sh` path.
-2. `pip install pennylane pennylane-lightning-gpu pennylane-lightning[mpi]`.
-3. Verify Lightning-MPI loads:
-   `mpirun -np 2 python -c "import pennylane as qml; print(qml.about())"`.
-4. Verify Aer MPI mode loads:
-   `python -c "from qiskit_aer import AerSimulator; s = AerSimulator(method='statevector', device='GPU', blocking_enable=True); print('ok')"`.
-5. Run the warm-up per backend.
-6. Run the three backends × four molecules = 12 timed runs. ~10 min at 100
-   iterations per run.
-7. `rsync` results back to laptop before terminating instance.
+Uses the same Docker image (`vqe-mpi-gpu`) as every other benchmark in
+this repo — `pennylane-lightning-gpu` is already baked into the
+Dockerfile, so no separate host-level pip install is needed.
+
+1. Bootstrap the instance: `bash scripts/cloud_bootstrap.sh` (fixes the
+   docker-group permission issue that otherwise makes GPU detection
+   silently fail on a fresh cloud user — see README.md's Path A), then
+   `make build`.
+2. Verify Lightning-GPU loads inside the container (catches the known
+   "installed but silently falls back to CPU" issue — see
+   `docs/GPU_EXPECTATION_FIX.md`'s Lightning-GPU device-selection note):
+   ```bash
+   docker run --rm --gpus all vqe-mpi-gpu \
+       python3 -c "import pennylane as qml; qml.device('lightning.gpu', wires=2); print('lightning.gpu OK')"
+   ```
+3. Verify Aer MPI mode loads inside the container:
+   ```bash
+   docker run --rm --gpus all vqe-mpi-gpu \
+       python3 -c "from qiskit_aer import AerSimulator; s = AerSimulator(method='statevector', device='GPU', blocking_enable=True); print('ok')"
+   ```
+4. Run the warm-up per backend (`--warmup` flag on `baseline_comparison.py`).
+5. Run the three backends × six molecules (H2, LiH, BeH2, H2O, NH3, N2) via
+   `docker run --rm --gpus all vqe-mpi-gpu python3 -m benchmarks.baseline_comparison --backend <backend> --molecule <mol> --max-iters <n> --seed 42 --out-dir results/baseline_comparison_gpuexpect`
+   — see `qatabasis-internal/docs/POST_AUDIT_TODO.md`'s RERUN QUEUE for
+   the exact per-molecule iteration budgets and verification steps
+   currently in use.
+6. `rsync` results back to laptop before terminating the instance.
 8. Feed into a new aggregator (`benchmarks/aggregate_baseline.py`, deferred)
    to produce the paper table.
 
