@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
-# Bootstrap an AWS EC2 g5.xlarge for HPCHybridStack multi-cloud validation.
-# Design + rationale: docs/AWS_DEPLOYMENT.md.
+# Bootstrap an AWS EC2 g5.xlarge for QatabasisStack multi-cloud validation.
+# Uses the same Docker path as Lambda Cloud (make build / make run), via
+# scripts/cloud_bootstrap.sh, so both clouds run identical, reproducible
+# infrastructure rather than two different install methods per provider.
+# Design + rationale: docs/AWS_DEPLOYMENT.md (qatabasis-internal repo).
 #
 # Usage:
 #   AWS_KEY=~/.ssh/aws-vqe.pem AWS_KEY_NAME=aws-vqe AWS_SG=sg-xxxxxxxx \
@@ -77,15 +80,25 @@ rsync -az \
     -e "ssh -i $AWS_KEY -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null" \
     "$REPO_ROOT/" ubuntu@"$PUBLIC_IP":~/qatabasis/
 
-echo "[deploy] running install_native.sh on the instance..."
+echo "[deploy] running cloud_bootstrap.sh on the instance (docker group + GPU-in-Docker check)..."
 ssh -i "$AWS_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
     ubuntu@"$PUBLIC_IP" \
-    "cd ~/qatabasis && bash install_native.sh"
+    "cd ~/qatabasis && bash scripts/cloud_bootstrap.sh"
+
+echo "[deploy] building the Docker image (same path used on Lambda -- keeps"
+echo "         AWS and Lambda runs on identical, reproducible infrastructure)..."
+echo "[deploy] NOTE: if cloud_bootstrap.sh just added this user to the docker"
+echo "         group for the first time, this SSH command runs in a NEW"
+echo "         connection (not the bootstrap's own shell), so group membership"
+echo "         is already active here -- no separate re-login needed."
+ssh -i "$AWS_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+    ubuntu@"$PUBLIC_IP" \
+    "cd ~/qatabasis && make build"
 
 echo "[deploy] running smoke test (make pytest)..."
 ssh -i "$AWS_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
     ubuntu@"$PUBLIC_IP" \
-    "cd ~/qatabasis && conda run -n hybrid-vqe make pytest" \
+    "cd ~/qatabasis && make pytest" \
     || echo "[deploy] WARNING: pytest did not exit 0 — investigate before running the workload."
 
 cat <<EOF
@@ -95,7 +108,6 @@ cat <<EOF
 Follow-up:
   ssh -i $AWS_KEY ubuntu@$PUBLIC_IP
   cd ~/qatabasis
-  conda activate hybrid-vqe
   make run NP=2 MOLECULES="H2 LiH BeH2 H2O"
 
 Before terminating (do this every time):

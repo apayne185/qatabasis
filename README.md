@@ -20,12 +20,26 @@ Designed as reusable middleware: `HardwareProfile.detect()` auto-selects the bes
 
 ```bash
 git clone <repo-url> && cd qatabasis
+bash scripts/cloud_bootstrap.sh       # fresh cloud instance only (Lambda/AWS/etc) --
+                                       # fixes the docker-group permission issue that
+                                       # otherwise makes GPU detection silently fail;
+                                       # safe to skip on a laptop/pre-configured host
 make build                           # ~10 min first time; CUDA 12.6 + OpenMPI + Python 3.11 image
 make trial NP=2                      # 7-layer diagnostic; passes 7/7 on any laptop (CPU fallback)
 make run NP=2                        # Full 4-molecule benchmark (simulator)
 ```
 
 Same image runs GPU-accelerated on any NVIDIA host with the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html) installed (add `--gpus all` — already in the Makefile targets).
+
+**On a fresh cloud GPU instance** (Lambda, AWS, or any other provider): the
+default user is often not yet in the `docker` group, which makes `docker
+build`/`docker run` fail with a permission error — and, confusingly, makes
+the Makefile's own GPU-detection probe fail the *exact same way*, so a
+permission problem looks identical to "no GPU present" and silently falls
+back to CPU. `scripts/cloud_bootstrap.sh` fixes the group membership,
+verifies the GPU is actually visible *inside* a Docker container (not just
+to the host), and tells you explicitly which case you're in before you ever
+run `make build`. Idempotent — safe to re-run.
 
 ### Path B — Native conda on a bare-metal HPC (no Docker)
 
@@ -200,7 +214,9 @@ The GPU accelerated experiments used [Lambda Cloud](https://lambdalabs.com/servi
 4. **Clone and run** the stack. The Docker image handles all CUDA/driver dependencies:
    ```bash
    git clone <repo-url> && cd qatabasis
-   make build && make run NP=4           #  GPU is auto detected inside container
+   bash scripts/cloud_bootstrap.sh        #  one-time: fixes docker-group permissions
+                                           #  (see Path A above for why this matters)
+   make build && make run NP=4            #  GPU is auto detected inside container
    ```
 5. Verify GPU detection in the output:
    ```
