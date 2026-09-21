@@ -526,14 +526,24 @@ with no CUDA-capable GPU, the stack transparently falls back to
 
 ### Tutorial 2 — Same code on a cloud GPU
 
-Same commands, different host. On Lambda Cloud or any host with the
+Same commands, different host. On Lambda Cloud, AWS, or any host with the
 NVIDIA Container Toolkit installed:
 
     ssh ubuntu@<gpu-instance-ip>
     git clone https://github.com/apayne185/qatabasis.git
     cd qatabasis
-    sudo make build
-    sudo make trial NP=2
+    bash scripts/cloud_bootstrap.sh    # one-time: docker-group + GPU-in-Docker check
+    make build
+    make trial NP=2
+
+`cloud_bootstrap.sh` fixes the common "fresh cloud user isn't in the
+`docker` group yet" friction — without it, `docker build`/`docker run`
+fail with a permission error, and the Makefile's own GPU-detection probe
+fails the *same way*, so it silently looks identical to "no GPU present"
+and falls back to CPU. If the script reports it just added you to the
+`docker` group for the first time, either reconnect over SSH or run
+`newgrp docker` before the `make build` line above — group membership
+only takes effect on a new login session, not the one you're already in.
 
 The Makefile's Docker invocation includes `--gpus all` when it detects
 a GPU. `HardwareProfile` picks up the GPU class and enables
