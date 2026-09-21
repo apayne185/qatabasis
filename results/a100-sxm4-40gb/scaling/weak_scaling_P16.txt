@@ -1,0 +1,1 @@
+P=16 mol=NH3 terms=3057 terms/rank=191 T_total=2.0725 T/iter=0.2072 final_E=-47.357351
