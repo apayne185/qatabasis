@@ -163,6 +163,56 @@ def check_mpi() -> None:
     except ImportError as e:
         _fail(f"hpc_core not importable: {e}. Run `make build` first.")
 
+    _check_mpi_implementation()
+
+
+def _check_mpi_implementation() -> None:
+    # scripts/install_native.sh deliberately builds hpc_core against
+    # conda's bundled mpich (not the host's system MPI, which may be
+    # broken on some clusters -- see that script's own comments). The
+    # scripts/slurm_*.sh scripts launch with `mpirun -bootstrap fork`,
+    # an MPICH-specific flag -- OpenMPI's mpirun doesn't recognize it and
+    # fails immediately with an "unrecognized argument" error. This
+    # mismatch only bites the native/HPC-cluster path (Docker path always
+    # uses its own bundled OpenMPI, matching the Dockerfile's `mpirun
+    # --allow-run-as-root` invocations, which don't use -bootstrap), and
+    # only if a cluster's default `mpirun` on PATH isn't the conda env's
+    # mpich (e.g. the conda env isn't activated, or a `module load
+    # openmpi` shadows it). Loud failure either way, not silent -- this
+    # just gives an upfront pointer instead of a cryptic launcher error.
+    import shutil
+    import subprocess
+
+    mpirun_path = shutil.which("mpirun")
+    if not mpirun_path:
+        return  # already reported as MPI-not-functional above
+
+    try:
+        out = subprocess.run([mpirun_path, "--version"], capture_output=True,
+                              text=True, timeout=5)
+        version_text = (out.stdout + out.stderr).lower()
+    except (subprocess.TimeoutExpired, OSError):
+        return
+
+    if "mpich" in version_text:
+        _ok(f"mpirun on PATH ({mpirun_path}) is MPICH -- compatible with "
+            f"scripts/slurm_*.sh's `-bootstrap fork` flag")
+    elif "open mpi" in version_text or "openrte" in version_text:
+        _warn(f"mpirun on PATH ({mpirun_path}) is OpenMPI, not MPICH. This "
+              f"is fine for the Docker path (make build/run/trial use "
+              f"Docker's own bundled OpenMPI). If you're on the native/HPC "
+              f"install path (scripts/install_native.sh, which links "
+              f"hpc_core against conda's mpich): scripts/slurm_*.sh launch "
+              f"with `mpirun -bootstrap fork`, an MPICH-only flag that "
+              f"OpenMPI's mpirun will reject outright. Make sure the conda "
+              f"env is activated (its mpich mpirun should shadow this one) "
+              f"before running those scripts.")
+    else:
+        _warn(f"mpirun on PATH ({mpirun_path}) reports an unrecognized "
+              f"implementation -- could not confirm MPICH vs OpenMPI "
+              f"compatibility with scripts/slurm_*.sh's `-bootstrap fork` "
+              f"flag.")
+
 
 def check_ibm() -> None:
     token = os.environ.get("IBM_QUANTUM_TOKEN", "")
