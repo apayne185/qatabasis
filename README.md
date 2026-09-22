@@ -25,6 +25,7 @@ bash scripts/cloud_bootstrap.sh       # fresh cloud instance only (Lambda/AWS/et
                                        # otherwise makes GPU detection silently fail;
                                        # safe to skip on a laptop/pre-configured host
 make build                           # ~10 min first time; CUDA 12.6 + OpenMPI + Python 3.11 image
+make doctor                           # readiness check: GPU/MPI/IBM in one command, any target
 make trial NP=2                      # 7-layer diagnostic; passes 7/7 on any laptop (CPU fallback)
 make run NP=2                        # Full 4-molecule benchmark (simulator)
 ```
@@ -369,6 +370,7 @@ After 10 iterations, iteration 10 checkpoint was deleted. The stack detected the
 | Target | Description |
 |--------|-------------|
 | `make build` | Build Docker image |
+| `make doctor` | Readiness check (GPU/MPI/IBM) for any environment, one command |
 | `make trial NP=2` | 7-layer diagnostic + stress tests (simulator, 2 ranks) |
 | `make run NP=4` | Full chemistry benchmark with MPI (simulator) |
 | `make run-ibm NP=2` | Run on IBM Quantum QPU (requires `.env` credentials) |

@@ -528,8 +528,15 @@ registry pattern; see [`docs/FUTURE_WORK.md`](FUTURE_WORK.md) for details.
     git clone https://github.com/apayne185/qatabasis.git
     cd qatabasis
     make build              # ~10 min first time
+    make doctor              # readiness check: GPU/MPI/IBM, one command
     make trial NP=2         # ~5 min, expect: Tests passed: 7 / 7
     make run NP=2           # full 4-molecule benchmark
+
+`make doctor` works the same way on any target — a laptop, any cloud GPU
+vendor, or an IBM QPU-configured `.env` — and gives a clear ready/not-ready
+verdict plus specific fixes for anything it finds wrong (e.g. an
+unrecognized GPU model, a Docker permission issue, missing/invalid IBM
+credentials). Run it first on any new environment before `make trial`.
 
 Output lands in `results/cpu-only/simulator/simulator_<timestamp>.json` (or
 `results/<hardware-slug>/simulator/...` if a GPU is detected). On a laptop

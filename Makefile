@@ -36,7 +36,7 @@ else
 endif
 
 
-.PHONY: build trial run run-ibm scaling baseline clean shell test pytest \
+.PHONY: build trial run run-ibm scaling baseline clean shell test pytest doctor \
         native-install native-trial native-run \
         slurm-trial slurm-run slurm-scaling slurm-weak-scaling slurm-ibm \
         slurm-multi-seed slurm-ibm-seeds aggregate-seeds aggregate-scaling \
@@ -46,6 +46,23 @@ build:
 	@echo "[Make] Building Docker image '$(IMAGE_NAME)' ..."
 	docker build -t $(IMAGE_NAME) .
 	@echo "[Make] Build complete."
+
+
+# READINESS CHECK - single command to answer "is this environment ready
+# to use this stack" for any target: cloud GPU, IBM QPU, or CPU-only.
+# Runs inside the container with the same --gpus flag `make trial`/`make
+# run` use, so GPU visibility is checked exactly as the real workload
+# would see it. See scripts/doctor.py for what's actually checked.
+doctor:
+	@echo "[Make] Running readiness check ..."
+	docker run --rm \
+	  $(GPU_FLAG) \
+	  -e IBM_QUANTUM_TOKEN="$(IBM_QUANTUM_TOKEN)" \
+	  -e IBM_QUANTUM_INSTANCE="$(IBM_QUANTUM_INSTANCE)" \
+	  -e IBM_QUANTUM_BACKEND="$(IBM_QUANTUM_BACKEND)" \
+	  -e IBM_QUANTUM_REGION="$(IBM_QUANTUM_REGION)" \
+	  $(IMAGE_NAME) \
+	  python3 scripts/doctor.py
 
 
 # DIAGNOSTIC - tests the 6 layers on simulator
