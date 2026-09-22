@@ -343,7 +343,7 @@ The stack completed 10 VQE iterations on IBM's 156-qubit `ibm_marrakesh` Heron p
 
 ### Checkpoint Resilience
 
-The stack checkpoints the global $\theta$ state every 5 iterations to `.npy` files with a rolling retention of the 5 most recent checkpoints. 
+The stack checkpoints the global $\theta$ state to `.npy` files on an adaptive cadence that scales with measured per-iteration wall-clock time, bounding both the work lost on an interrupt and the total rollback depth retained. On fast workloads (including this H2 diagnostic test) the cadence matches the original fixed scheme — every 5 iterations, rolling retention of the 5 most recent — and only checkpoints more often as a workload's iterations get slower (e.g. larger molecules, future non-chemistry applications).
 
 | Phase | Iterations | Start Energy ($E_h$) | End Energy ($E_h$) |
 |-------|-----------|---------------------|---------------------|

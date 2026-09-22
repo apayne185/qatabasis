@@ -150,7 +150,14 @@ Runs the SPSA optimization loop for a given problem.
 
 **Side effects:**
 
-- Writes `checkpoint_iter_XXXX.npy` every 5 iterations, keeps the last 5
+- Writes `checkpoint_iter_XXXX.npy` on an adaptive cadence, keeps an
+  adaptive number of recent checkpoints. Both scale with measured
+  per-iteration wall-clock time so an interrupt never risks losing more
+  than ~2 minutes of work (floor: every 1 iteration on very slow
+  workloads) and rollback history covers ~10 minutes. On fast workloads
+  (e.g. small molecules) this stays at the original fixed cadence of
+  every 5 iterations / last 5 retained — the adaptation only checkpoints
+  *more* often as iterations get slower, never less.
 - Broadcasts theta across MPI ranks via `comm.Bcast`
 - Aggregates partial energies via `MPI_Allreduce(SUM)`
 - Tracks best-physical-energy (below-FCI mitigation for HWE ansatz)

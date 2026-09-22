@@ -398,12 +398,45 @@ class QatabasisStack:
                         print(f"Converged: energy spread over last 10 iters = {spread:.2e} < tol={tolerance}, at iteration {k}")
                         stop_signal[0] = 1
 
-                if k % 5 == 0:
+                # Adaptive checkpoint cadence: bound wall-clock time at risk
+                # on interrupt, not iteration count. A fixed "every 5 iters"
+                # is fine for small molecules (H2 at ~0.14s/iter loses under
+                # a second) but on a much slower workload -- a bigger
+                # molecule, a future non-chemistry application, UCCSD instead
+                # of HWE -- 5 iterations could be many minutes, and losing
+                # that on a crash is exactly the failure mode checkpointing
+                # exists to prevent. Target: never checkpoint so rarely that
+                # an interrupt risks more than ~_CKPT_MAX_SECONDS_AT_RISK of
+                # recomputation, and never retain so little history that a
+                # bad/corrupted latest checkpoint leaves no earlier fallback
+                # within ~_CKPT_MIN_HISTORY_SECONDS.
+                # Ceiling of 5 preserves the original fixed cadence as an
+                # upper bound: on fast workloads (small molecules, short
+                # smoke/diagnostic runs -- e.g. Experiment 6's 5-iteration
+                # resilience test, which hard-asserts a checkpoint exists at
+                # iteration 5) this never checkpoints LESS often than before,
+                # only more often as iterations get slower. Without this cap,
+                # a fast per-iter time would push the interval past
+                # max_iterations entirely and a short run would never
+                # checkpoint at all.
+                _CKPT_MAX_SECONDS_AT_RISK = 120.0   # cap time lost on interrupt
+                _CKPT_MIN_HISTORY_SECONDS = 600.0   # cap total rollback depth
+                _CKPT_INTERVAL_CEILING = 5          # never checkpoint less often than this
+                if _iter_wall_history:
+                    _median_iter_s = sorted(_iter_wall_history[-5:])[len(_iter_wall_history[-5:]) // 2]
+                    checkpoint_every = max(1, min(_CKPT_INTERVAL_CEILING,
+                                                   round(_CKPT_MAX_SECONDS_AT_RISK / max(_median_iter_s, 1e-6))))
+                    retain_n = max(5, min(50, round(_CKPT_MIN_HISTORY_SECONDS / (checkpoint_every * max(_median_iter_s, 1e-6)))))
+                else:
+                    checkpoint_every, retain_n = 5, 5   # no timing data yet (first iter) -- old default
+
+                if k % checkpoint_every == 0:
                     ckpt_path = os.path.join(checkpoint_dir, f"checkpoint_iter_{k:04d}.npy")
                     np.save(ckpt_path, theta)
-                    print(f"[RESILIENCE] Iteration {k}: Global theta state checkpointed at path {ckpt_path}. ")
-                    existing = sorted(_glob.glob(os.path.join(checkpoint_dir, "checkpoint_iter_*.npy")))  # rotate: keep last 5
-                    for old in existing[:-5]:
+                    print(f"[RESILIENCE] Iteration {k}: Global theta state checkpointed at path "
+                          f"{ckpt_path} (every {checkpoint_every} iters, retaining last {retain_n}). ")
+                    existing = sorted(_glob.glob(os.path.join(checkpoint_dir, "checkpoint_iter_*.npy")))
+                    for old in existing[:-retain_n]:
                         os.remove(old)
 
             comm.Bcast(theta, root=0)
