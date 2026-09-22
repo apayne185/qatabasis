@@ -14,8 +14,11 @@ pyscf>=2.14.0
 
 # HPC / parallel
 mpi4py>=4.1.2
-numpy>=2.5.3
-scipy>=1.18.1
+# numpy>=2.5.3/scipy>=1.18.1 were wrong -- numpy 2.5.x requires Python
+# >=3.12; this stack's Dockerfile targets Python 3.11 (caught by CI's
+# build failure, re-verified in a real python:3.11 container 2026-09-22).
+numpy>=2.4.6
+scipy>=1.17.1
 
 # Testing
 pytest>=9.1.1

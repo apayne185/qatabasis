@@ -39,9 +39,16 @@ RUN pip3 install --no-cache-dir --upgrade pip setuptools wheel
 # nonexistent qiskit-aer-gpu dependency, a separate bug -- pip has no
 # distribution under that name anymore, so `conda env create` on the
 # native install path would fail outright on that line today).
+# IMPORTANT: numpy/scipy pins below were first verified in a Python 3.13
+# scratch venv, not this image's actual Python 3.11 -- numpy 2.5.x
+# requires Python >=3.12 and CI caught the resulting build failure
+# (numpy==2.5.3 has no distribution for 3.11). Re-verified inside an
+# actual python:3.11-slim container: numpy 2.4.6 and scipy 1.17.1 are
+# the correct, Python-3.11-compatible versions; everything else below
+# was unaffected (no Python-version-gated releases yet for those).
 RUN pip3 install --no-cache-dir \
-    numpy==2.5.3 \
-    scipy==1.18.1 \
+    numpy==2.4.6 \
+    scipy==1.17.1 \
     mpi4py==4.1.2 \
     pybind11==3.1.0 \
     qiskit==2.5.2 \
