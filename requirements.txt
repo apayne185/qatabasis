@@ -1,3 +1,11 @@
+# NOTE: not currently installed by any tested path (Dockerfile has its own
+# pinned pip install list; scripts/install_native.sh uses environment.yml).
+# Kept as a reference/reproducibility record and for anyone doing a manual
+# `pip install -r requirements.txt` outside Docker/conda. If you change
+# Dockerfile's pins, update this file to match (or vice versa) so they
+# don't drift out of sync again -- see Dockerfile's own pin comment for
+# the 2026-09-22 verification this and it were both checked against.
+
 # Core quantum
 qiskit>=2.5.2,<3.0
 qiskit-nature>=0.8.0

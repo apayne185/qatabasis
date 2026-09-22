@@ -125,6 +125,22 @@ fi
 make -j"$(nproc)"
 
 # ------------------------------------------------------------------
+# Step 4b: qiskit-aer with GPU support, built from source.
+# environment.yml used to depend on a separate `qiskit-aer-gpu` PyPI
+# package for this -- that package no longer exists (removed from PyPI;
+# `conda env create` would fail outright on that line). GPU support now
+# comes from building plain qiskit-aer with AER_THRUST_BACKEND=CUDA, same
+# approach the Docker path already uses (see Dockerfile). Without this
+# step, environment.yml's plain `qiskit-aer` pip install resolves to a
+# CPU-only wheel -- this stack would still run, just silently without GPU
+# acceleration despite CUDA/nvcc having already been confirmed present
+# above. Safe to skip only if you deliberately want CPU-only here.
+# ------------------------------------------------------------------
+echo "[install] Building qiskit-aer from source with CUDA support ..."
+AER_THRUST_BACKEND=CUDA python -m pip install --no-cache-dir --force-reinstall \
+    --no-binary qiskit-aer "qiskit-aer==0.17.2"
+
+# ------------------------------------------------------------------
 # UCX sanity check - conda-forge ucx 1.20.0 ships a broken libuct
 # (missing ucs_netif_is_ipoib symbol) that breaks mpi4py import.
 # Auto-downgrade rather than letting the user hit it later.
