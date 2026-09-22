@@ -4,10 +4,11 @@ Runs inside the vqe-mpi-gpu container (via `make doctor`, which passes
 --gpus all the same way `make trial`/`make run` do) so GPU visibility is
 checked the same way the real workload sees it, not from the Docker host.
 
-Checks, in order: GPU detection + database coverage, MPI, IBM credentials
-(if present). Exits 0 only if nothing found is a hard blocker -- unmatched
-GPU and missing IBM credentials are warnings (CPU-only / simulator-only use
-is a legitimate way to run this stack), not failures.
+Checks, in order: CPU architecture, GPU detection + database coverage, MPI,
+IBM credentials (if present). Exits 0 only if nothing found is a hard
+blocker -- unmatched GPU, non-x86_64 architecture, and missing IBM
+credentials are warnings (CPU-only / simulator-only use is a legitimate way
+to run this stack), not failures.
 """
 import os
 import sys
@@ -73,6 +74,32 @@ def _check_cuda_driver_floor() -> None:
     else:
         _ok(f"Host NVIDIA driver {driver_str} meets the CUDA 12.6.3 floor "
             f"({'.'.join(map(str, _CUDA_DRIVER_FLOOR))}+)")
+
+
+def check_arch() -> None:
+    import platform
+
+    machine = platform.machine().lower()
+    if machine in {"x86_64", "amd64"}:
+        _ok(f"Architecture: {machine} (supported)")
+        return
+
+    # This stack's GPU acceleration path depends on x86_64/manylinux-only
+    # wheels (cupy-cuda12x, the pinned nvidia-*-cu12 packages in
+    # environment.yml, qiskit-aer's CUDA source build) -- none of these
+    # publish aarch64 distributions. An ARM host (AWS Graviton, some
+    # GCP/Azure ARM SKUs) would otherwise hit a bare pip resolver error
+    # ("no matching distribution found") with no pointer to why. CPU-only
+    # use is unaffected -- numpy/scipy/qiskit/pyscf all publish aarch64
+    # wheels -- only the GPU acceleration path is x86_64-only today.
+    _warn(f"Architecture: {machine} (NOT x86_64). This stack's GPU "
+          f"acceleration path (cupy-cuda12x, qiskit-aer's CUDA build, "
+          f"pinned nvidia-*-cu12 wheels) is x86_64-only -- none of these "
+          f"publish {machine} distributions. CPU-only use should still "
+          f"work (numpy/scipy/qiskit/pyscf all publish {machine} wheels), "
+          f"but `make build`'s GPU-dependent pip installs will likely "
+          f"fail with a raw 'no matching distribution found' error rather "
+          f"than a clear message. Known limitation, not yet supported.")
 
 
 def check_gpu() -> None:
@@ -171,7 +198,8 @@ if __name__ == "__main__":
     print(" QatabasisStack readiness check")
     print("=" * 60)
 
-    for name, fn in [("GPU", check_gpu), ("MPI", check_mpi), ("IBM QPU", check_ibm)]:
+    for name, fn in [("Architecture", check_arch), ("GPU", check_gpu),
+                      ("MPI", check_mpi), ("IBM QPU", check_ibm)]:
         print(f"\n--- {name} ---")
         try:
             fn()
