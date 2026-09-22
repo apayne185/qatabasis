@@ -304,6 +304,10 @@ class QatabasisStack:
         for loop_k in range(1, max_iterations +1):
             k = loop_k + start_iter
             stop_signal[0] = 0
+            # Declared on every rank (not just inside `if self.rank == 0:`
+            # below) since the Bcast that reads/writes it after the loop
+            # body must run on every rank -- see the comment at that Bcast.
+            _ckpt_failed = np.array([0], dtype=np.int32)
             _iter_t0 = _time.perf_counter()
 
             # START-of-iter heartbeat -- for problems where a single iter
@@ -432,12 +436,36 @@ class QatabasisStack:
 
                 if k % checkpoint_every == 0:
                     ckpt_path = os.path.join(checkpoint_dir, f"checkpoint_iter_{k:04d}.npy")
-                    np.save(ckpt_path, theta)
-                    print(f"[RESILIENCE] Iteration {k}: Global theta state checkpointed at path "
-                          f"{ckpt_path} (every {checkpoint_every} iters, retaining last {retain_n}). ")
-                    existing = sorted(_glob.glob(os.path.join(checkpoint_dir, "checkpoint_iter_*.npy")))
-                    for old in existing[:-retain_n]:
-                        os.remove(old)
+                    try:
+                        np.save(ckpt_path, theta)
+                        print(f"[RESILIENCE] Iteration {k}: Global theta state checkpointed at path "
+                              f"{ckpt_path} (every {checkpoint_every} iters, retaining last {retain_n}). ")
+                        existing = sorted(_glob.glob(os.path.join(checkpoint_dir, "checkpoint_iter_*.npy")))
+                        for old in existing[:-retain_n]:
+                            os.remove(old)
+                    except OSError as e:
+                        print(f"[Stack] rank 0: checkpoint write failed at iteration {k}: {e}",
+                              file=sys.stderr, flush=True)
+                        _ckpt_failed[0] = 1
+
+            # A failed checkpoint write (disk full, permission error,
+            # unwritable mount) must not let rank 0 die inside the
+            # `if self.rank == 0:` block above while every other rank is
+            # about to block in the Bcast calls below -- that's a silent,
+            # indefinite hang with no timeout, the same divergent-collective
+            # failure mode the cost-preflight Bcast earlier in this method
+            # already guards against. This Bcast (and the check after it)
+            # must run on EVERY rank, not just rank 0 -- that's why it's
+            # outside the `if self.rank == 0:` block, mirroring theta/
+            # stop_signal's Bcasts immediately below.
+            comm.Bcast(_ckpt_failed, root=0)
+            if _ckpt_failed[0]:
+                raise RuntimeError(
+                    f"Checkpoint write failed on rank 0 at iteration {k} "
+                    f"(disk full, permission error, or unwritable "
+                    f"checkpoint_dir='{checkpoint_dir}') -- aborting all "
+                    f"ranks instead of hanging on the next collective call."
+                )
 
             comm.Bcast(theta, root=0)
             comm.Bcast(stop_signal, root=0)
