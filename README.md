@@ -80,6 +80,7 @@ Everything is controlled through environment variables — no code changes neede
 | `VQE_LEGACY_EXPECT` | `1` | Force the legacy CPU-side expectation path even at `NP=1` (A/B testing) |
 | `VQE_GPU_EXPECT_MPI` | `1` | Force the GPU-native expectation path even at `NP>=2` (has a known ~3.6x per-iter MPI regression — see `docs/GPU_EXPECTATION_FIX.md`; not for published results) |
 | `VQE_ACCEPT_COST` | `1` | Required to proceed when the compute-cost pre-flight check aborts a run (per-iteration cost too high — e.g. CO2 at 30 qubits). See `docs/API.md`'s config table for the exact thresholds. |
+| `VQE_ACCEPT_MEMORY_RISK` | `1` | Required to proceed when the GPU-memory pre-flight check aborts a run (problem's statevector estimated not to fit in this GPU's memory). None of the canonical benchmark molecules trigger this on any hardware used in this repo's results. See `docs/API.md`'s config table for details. |
 
 By default the stack picks the faster GPU-native expectation path at
 `NP=1` and the legacy path at `NP>=2` (the GPU-native path regresses under

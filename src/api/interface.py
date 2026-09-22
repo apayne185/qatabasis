@@ -204,16 +204,20 @@ class QatabasisStack:
             max_fit = self.hw.max_qubits_fit(self.precision, mpi_size=self.size)
             extra = f" (GPU fits up to ~{max_fit} qubits at this precision)" if max_fit else ""
             print(f"[Stack] Precision: {self.precision} for {num_qubits}-qubit problem{extra}")
+            self._memory_risk_pending = False
             if self._gpu_sv and max_fit and num_qubits > max_fit:
                 ranks_per_gpu = -(-self.size // max(self.hw.gpu_count, 1))
                 print(
-                    f"[Stack] WARNING: {num_qubits}-qubit problem exceeds the estimated "
+                    f"[Stack] MEMORY WARNING: {num_qubits}-qubit problem exceeds the estimated "
                     f"~{max_fit}-qubit GPU capacity ({self.size} rank(s) across "
                     f"{self.hw.gpu_count} GPU(s), ~{ranks_per_gpu} rank(s) sharing each "
-                    f"card). This will likely be extremely slow (memory pressure/paging, "
-                    f"not a crash) rather than fail fast. Consider fewer ranks, "
-                    f"VQE_PRECISION=fp32, or a larger-memory GPU before waiting on this."
+                    f"card). Whether this pages/thrashes (slow but survives) or hard-crashes "
+                    f"with a CUDA out-of-memory error depends on this GPU/driver's memory "
+                    f"oversubscription support, which is not guaranteed across vendors -- "
+                    f"do not assume it will merely be slow. Consider fewer ranks, "
+                    f"VQE_PRECISION=fp32, or a larger-memory GPU before proceeding."
                 )
+                self._memory_risk_pending = True
 
             # Compute-cost pre-flight: SPSA needs 2 statevector builds per iter, and each
             # rank evaluates its Pauli-term slice against that statevector. Warns about
@@ -240,9 +244,10 @@ class QatabasisStack:
             else:
                 self._large_cost_pending = False
         else:
+            self._memory_risk_pending = False
             self._large_cost_pending = False
 
-        # The warning above used to only print and continue -- despite the code
+        # The warnings above used to only print and continue -- despite the code
         # comment claiming it "blocks the exact CO2 failure mode," nothing in
         # the control flow actually stopped execution. Gate on an explicit,
         # rank-uniform opt-in instead: rank 0's decision is broadcast so every
@@ -262,6 +267,20 @@ class QatabasisStack:
                 "vqe_optimize() aborted by the compute-cost pre-flight check "
                 "(see the LARGE-COST WARNING printed on rank 0). Set "
                 "VQE_ACCEPT_COST=1 to proceed anyway."
+            )
+
+        _memory_risk_flag = np.array([1 if getattr(self, "_memory_risk_pending", False) else 0], dtype=np.int32)
+        comm.Bcast(_memory_risk_flag, root=0)
+        if _memory_risk_flag[0] and os.environ.get("VQE_ACCEPT_MEMORY_RISK", "").strip() not in {"1", "yes", "true"}:
+            if self.rank == 0:
+                print(
+                    "[Stack] Refusing to start: set VQE_ACCEPT_MEMORY_RISK=1 to proceed "
+                    "anyway once you've reviewed the MEMORY WARNING above."
+                )
+            raise RuntimeError(
+                "vqe_optimize() aborted by the GPU-memory pre-flight check "
+                "(see the MEMORY WARNING printed on rank 0). Set "
+                "VQE_ACCEPT_MEMORY_RISK=1 to proceed anyway."
             )
 
         os.makedirs(checkpoint_dir, exist_ok=True)
