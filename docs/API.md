@@ -315,6 +315,14 @@ Raise `MoleculeTooBigError` for anything exceeding `max_qubits`, checked
 against `estimated_qubits` (see below). `local_test_run.py` uses
 `max_qubits=30` to accommodate ceiling tests up to CO₂.
 
+`allow_network=False` disables the PubChem fallback entirely (registry +
+raw-geometry + SMILES resolution still work). Set this on a
+network-restricted host (corporate/university egress rules, air-gapped
+cluster) — without it, a molecule name that isn't in the local registry
+and can't be parsed as raw geometry or SMILES silently attempts a PubChem
+network call by default, which can stall up to the request timeout
+(~10-25s) before failing on a host with blocked/dropped outbound HTTPS.
+
 #### `resolve(molecule_input, freeze_core=True) -> ResolutionResult`
 
 Returns a `ResolutionResult` dataclass with `geometry`, `source`,
