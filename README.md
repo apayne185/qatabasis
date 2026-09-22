@@ -25,6 +25,7 @@ bash scripts/cloud_bootstrap.sh       # fresh cloud instance only (Lambda/AWS/et
                                        # otherwise makes GPU detection silently fail;
                                        # safe to skip on a laptop/pre-configured host
 make build                           # ~10 min first time; CUDA 12.6 + OpenMPI + Python 3.11 image
+make doctor                           # readiness check: GPU/MPI/IBM in one command, any target
 make trial NP=2                      # 7-layer diagnostic; passes 7/7 on any laptop (CPU fallback)
 make run NP=2                        # Full 4-molecule benchmark (simulator)
 ```
@@ -79,6 +80,7 @@ Everything is controlled through environment variables — no code changes neede
 | `VQE_LEGACY_EXPECT` | `1` | Force the legacy CPU-side expectation path even at `NP=1` (A/B testing) |
 | `VQE_GPU_EXPECT_MPI` | `1` | Force the GPU-native expectation path even at `NP>=2` (has a known ~3.6x per-iter MPI regression — see `docs/GPU_EXPECTATION_FIX.md`; not for published results) |
 | `VQE_ACCEPT_COST` | `1` | Required to proceed when the compute-cost pre-flight check aborts a run (per-iteration cost too high — e.g. CO2 at 30 qubits). See `docs/API.md`'s config table for the exact thresholds. |
+| `VQE_ACCEPT_MEMORY_RISK` | `1` | Required to proceed when the GPU-memory pre-flight check aborts a run (problem's statevector estimated not to fit in this GPU's memory). None of the canonical benchmark molecules trigger this on any hardware used in this repo's results. See `docs/API.md`'s config table for details. |
 
 By default the stack picks the faster GPU-native expectation path at
 `NP=1` and the legacy path at `NP>=2` (the GPU-native path regresses under
@@ -343,7 +345,7 @@ The stack completed 10 VQE iterations on IBM's 156-qubit `ibm_marrakesh` Heron p
 
 ### Checkpoint Resilience
 
-The stack checkpoints the global $\theta$ state every 5 iterations to `.npy` files with a rolling retention of the 5 most recent checkpoints. 
+The stack checkpoints the global $\theta$ state to `.npy` files on an adaptive cadence that scales with measured per-iteration wall-clock time, bounding both the work lost on an interrupt and the total rollback depth retained. On fast workloads (including this H2 diagnostic test) the cadence matches the original fixed scheme — every 5 iterations, rolling retention of the 5 most recent — and only checkpoints more often as a workload's iterations get slower (e.g. larger molecules, future non-chemistry applications).
 
 | Phase | Iterations | Start Energy ($E_h$) | End Energy ($E_h$) |
 |-------|-----------|---------------------|---------------------|
@@ -369,6 +371,7 @@ After 10 iterations, iteration 10 checkpoint was deleted. The stack detected the
 | Target | Description |
 |--------|-------------|
 | `make build` | Build Docker image |
+| `make doctor` | Readiness check (GPU/MPI/IBM) for any environment, one command |
 | `make trial NP=2` | 7-layer diagnostic + stress tests (simulator, 2 ranks) |
 | `make run NP=4` | Full chemistry benchmark with MPI (simulator) |
 | `make run-ibm NP=2` | Run on IBM Quantum QPU (requires `.env` credentials) |

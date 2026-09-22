@@ -10,17 +10,33 @@ ifneq (,$(wildcard .env))
   export
 endif
  
-GPU_AVAILABLE := $(shell docker run --rm --gpus all nvidia/cuda:12.2.0-base-ubuntu22.04 nvidia-smi > /dev/null 2>&1 && echo yes || echo no)
-ifeq ($(GPU_AVAILABLE),yes)    
-  GPU_FLAG = --gpus all  
+# Single invocation, output captured once -- checked for both success and
+# (on failure) the permission-denied signature, instead of running the
+# probe twice with two different failure-detection strategies.
+GPU_PROBE_OUTPUT := $(shell docker run --rm --gpus all nvidia/cuda:12.2.0-base-ubuntu22.04 nvidia-smi 2>&1; echo "EXIT:$$?")
+GPU_AVAILABLE := $(if $(findstring EXIT:0,$(GPU_PROBE_OUTPUT)),yes,no)
+ifeq ($(GPU_AVAILABLE),yes)
+  GPU_FLAG = --gpus all
   $(info [Make] GPU detected — CUDA acceleration enabled.)
-else   
-  GPU_FLAG =  
-  $(info [Make] No GPU detected — falling back to CPU mode.)   
-endif     
+else
+  GPU_FLAG =
+  # A Docker permission problem (user not in the `docker` group yet) looks
+  # IDENTICAL to "no GPU present" here unless we actually inspect the
+  # error -- this exact confusion cost real debugging time on a fresh
+  # Lambda instance this session. Check for the permission-denied
+  # signature and point at the real fix instead of the misleading
+  # "No GPU detected" message.
+  ifneq (,$(findstring permission denied,$(GPU_PROBE_OUTPUT)))
+    $(info [Make] GPU probe failed with a Docker PERMISSION error, not necessarily)
+    $(info [Make] a missing GPU. Run: bash scripts/cloud_bootstrap.sh)
+    $(info [Make] Falling back to CPU mode for now.)
+  else
+    $(info [Make] No GPU detected — falling back to CPU mode.)
+  endif
+endif
 
 
-.PHONY: build trial run run-ibm scaling baseline clean shell test pytest \
+.PHONY: build trial run run-ibm scaling baseline clean shell test pytest doctor \
         native-install native-trial native-run \
         slurm-trial slurm-run slurm-scaling slurm-weak-scaling slurm-ibm \
         slurm-multi-seed slurm-ibm-seeds aggregate-seeds aggregate-scaling \
@@ -30,6 +46,23 @@ build:
 	@echo "[Make] Building Docker image '$(IMAGE_NAME)' ..."
 	docker build -t $(IMAGE_NAME) .
 	@echo "[Make] Build complete."
+
+
+# READINESS CHECK - single command to answer "is this environment ready
+# to use this stack" for any target: cloud GPU, IBM QPU, or CPU-only.
+# Runs inside the container with the same --gpus flag `make trial`/`make
+# run` use, so GPU visibility is checked exactly as the real workload
+# would see it. See scripts/doctor.py for what's actually checked.
+doctor:
+	@echo "[Make] Running readiness check ..."
+	docker run --rm \
+	  $(GPU_FLAG) \
+	  -e IBM_QUANTUM_TOKEN="$(IBM_QUANTUM_TOKEN)" \
+	  -e IBM_QUANTUM_INSTANCE="$(IBM_QUANTUM_INSTANCE)" \
+	  -e IBM_QUANTUM_BACKEND="$(IBM_QUANTUM_BACKEND)" \
+	  -e IBM_QUANTUM_REGION="$(IBM_QUANTUM_REGION)" \
+	  $(IMAGE_NAME) \
+	  python3 scripts/doctor.py
 
 
 # DIAGNOSTIC - tests the 6 layers on simulator
@@ -68,6 +101,7 @@ run:
 	  -e MOLECULES="$(MOLECULES)" \
 	  -e MAX_ITERS=$(MAX_ITERS) \
 	  -e VQE_PRECISION=$(VQE_PRECISION) \
+	  -e RESUME=$(RESUME) \
 	  -v "$$(pwd)/checkpoints:/workspace/checkpoints" \
 	  -v "$$(pwd)/results:/workspace/results" \
 	  $(IMAGE_NAME) \

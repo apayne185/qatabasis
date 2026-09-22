@@ -50,6 +50,8 @@ are needed to switch hardware, backends, or workloads.
 | `VQE_LEGACY_EXPECT` | `1` \| unset | unset | Force the legacy CPU-side expectation path (GPU→CPU statevector copy + numpy) even at `NP=1`, where the GPU-native path is normally faster. Useful for A/B measurement or regression checks. |
 | `VQE_GPU_EXPECT_MPI` | `1` \| unset | unset | Force the GPU-native expectation path (`save_expectation_value`) even under MPI at `NP>=2`, where it is **not** the default due to a measured 3.6x per-iteration regression (per-rank Aer transpile cost amplifies when multiple ranks contend for one GPU). Only for validating a future fix — do not use for published results until that regression is resolved. |
 | `VQE_ACCEPT_COST` | `1` \| unset | unset | Required to proceed when the compute-cost pre-flight check (`vqe_optimize()`'s LARGE-COST WARNING) fires — i.e. per-iteration amplitude-touch cost exceeds ~1e11 (`2^num_qubits × n_pauli_terms`) or total Pauli evaluations exceed ~1e10. Without this set, the run aborts (all ranks, cleanly, before any real work starts) rather than silently committing to a many-hours-per-iteration run. Reducing `MAX_ITERS` alone does **not** avoid this — it only lowers total work, not per-iteration cost (e.g. CO2 at 30 qubits triggers this regardless of `MAX_ITERS`; see Tutorial 4 below). |
+| `VQE_ACCEPT_MEMORY_RISK` | `1` \| unset | unset | Required to proceed when the GPU-memory pre-flight check (`vqe_optimize()`'s MEMORY WARNING) fires — i.e. `HardwareProfile.max_qubits_fit()` estimates the problem's statevector won't comfortably fit in this GPU's memory at the current precision/rank-sharing configuration. Whether exceeding this is merely slow (paging) or a hard CUDA out-of-memory crash depends on the GPU/driver's memory oversubscription support, which isn't guaranteed across vendors — this is not assumed safe by default. None of the canonical benchmark molecules (H2–N2) trigger this on A100-40GB, RTX 6000 Ada, RTX A6000, or even GTX 1650 at any tested `NP`/precision; CO2 at 30 qubits sits exactly at the fp64 boundary on A100-40GB and does not trigger it either (it's still gated by `VQE_ACCEPT_COST` above). Only relevant on GPUs with noticeably less memory than these, or unusually high rank-sharing per GPU. |
+| `RESUME` | `1` \| unset | unset | `benchmarks/local_test_run.py` only. Writes results to a seed-stable filename (`simulator_seed<N>.json`, no timestamp) and, on each molecule's completion, incrementally saves results-so-far to that same file rather than only at the very end. On restart with the same `SEED`, molecules already present in that file are skipped. Use for any multi-hour, multi-molecule sweep (e.g. NH3/N2 across several seeds) where an interrupt (Ctrl+C, crash, terminated cloud instance) would otherwise lose every completed molecule, not just the one in flight — see the `for seed in ...` pattern in Tutorial 3 below. |
 
 **GPU-native vs. legacy expectation routing**: the stack picks between two
 ways of computing Pauli expectation values on GPU (`_expectation_on_gpu` vs.
@@ -149,7 +151,14 @@ Runs the SPSA optimization loop for a given problem.
 
 **Side effects:**
 
-- Writes `checkpoint_iter_XXXX.npy` every 5 iterations, keeps the last 5
+- Writes `checkpoint_iter_XXXX.npy` on an adaptive cadence, keeps an
+  adaptive number of recent checkpoints. Both scale with measured
+  per-iteration wall-clock time so an interrupt never risks losing more
+  than ~2 minutes of work (floor: every 1 iteration on very slow
+  workloads) and rollback history covers ~10 minutes. On fast workloads
+  (e.g. small molecules) this stays at the original fixed cadence of
+  every 5 iterations / last 5 retained — the adaptation only checkpoints
+  *more* often as iterations get slower, never less.
 - Broadcasts theta across MPI ranks via `comm.Bcast`
 - Aggregates partial energies via `MPI_Allreduce(SUM)`
 - Tracks best-physical-energy (below-FCI mitigation for HWE ansatz)
@@ -211,8 +220,12 @@ Probes:
 #### GPU database
 
 `_GPU_DATABASE` in `hardware.py` maps GPU-name substrings to
-`(class, fp64_ratio)` tuples. Currently covers: A100, H100, V100, A40,
+`(class, fp64_ratio)` tuples. Currently covers: A100, H100, V100, A10G, A40,
 RTX 6000 Ada, RTX A6000, RTX 4090/4080/3090/3080, GTX 1650/1660.
+
+Note: A10G (AWS g5.xlarge) classifies as `workstation`, not `datacenter`,
+despite AWS's own instance-family marketing — it shares A40's die and its
+crippled fp64:fp32 ratio (≈1/32), unlike full-fp64 A100/H100/V100.
 
 To add a new GPU, append a tuple like:
 
@@ -301,6 +314,14 @@ Location: [`src/api/molecule_resolver.py`](../src/api/molecule_resolver.py)
 Raise `MoleculeTooBigError` for anything exceeding `max_qubits`, checked
 against `estimated_qubits` (see below). `local_test_run.py` uses
 `max_qubits=30` to accommodate ceiling tests up to CO₂.
+
+`allow_network=False` disables the PubChem fallback entirely (registry +
+raw-geometry + SMILES resolution still work). Set this on a
+network-restricted host (corporate/university egress rules, air-gapped
+cluster) — without it, a molecule name that isn't in the local registry
+and can't be parsed as raw geometry or SMILES silently attempts a PubChem
+network call by default, which can stall up to the request timeout
+(~10-25s) before failing on a host with blocked/dropped outbound HTTPS.
 
 #### `resolve(molecule_input, freeze_core=True) -> ResolutionResult`
 
@@ -516,8 +537,15 @@ registry pattern; see [`docs/FUTURE_WORK.md`](FUTURE_WORK.md) for details.
     git clone https://github.com/apayne185/qatabasis.git
     cd qatabasis
     make build              # ~10 min first time
+    make doctor              # readiness check: GPU/MPI/IBM, one command
     make trial NP=2         # ~5 min, expect: Tests passed: 7 / 7
     make run NP=2           # full 4-molecule benchmark
+
+`make doctor` works the same way on any target — a laptop, any cloud GPU
+vendor, or an IBM QPU-configured `.env` — and gives a clear ready/not-ready
+verdict plus specific fixes for anything it finds wrong (e.g. an
+unrecognized GPU model, a Docker permission issue, missing/invalid IBM
+credentials). Run it first on any new environment before `make trial`.
 
 Output lands in `results/cpu-only/simulator/simulator_<timestamp>.json` (or
 `results/<hardware-slug>/simulator/...` if a GPU is detected). On a laptop
@@ -558,6 +586,20 @@ a GPU. `HardwareProfile` picks up the GPU class and enables
 
 Prints a median + [min, max] table across seeds. Use this pattern for
 publication-grade statistics.
+
+For large-molecule sweeps (e.g. NH3/N2, where a single seed can run for
+hours), add `RESUME=1` so an interrupted seed can pick back up instead of
+losing every molecule that already finished:
+
+    for s in 42 43 44 45 46; do
+        RESUME=1 SEED=$s MOLECULES="NH3 N2" make run NP=2
+    done
+
+If this is Ctrl+C'd or crashes partway through, say mid-N2 on seed 44,
+rerunning the exact same command resumes: NH3 (already saved) is skipped,
+and only N2 reruns. Without `RESUME=1`, an interrupt anywhere in the loop
+silently discards every molecule completed so far in that seed's process —
+see `docs/API.md`'s `RESUME` config-table entry above for the mechanism.
 
 ### Tutorial 4 — Hardware ceiling test (bigger molecule than the defaults)
 

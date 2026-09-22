@@ -1,0 +1,15 @@
+{
+  "baseline_backend": "hpchybrid",
+  "device": "gpu-custatevec",
+  "molecule": "H2O",
+  "num_qubits": 14,
+  "num_pauli": 1086,
+  "num_params": 112,
+  "max_iters": 100,
+  "iters_completed": 100,
+  "seed": 42,
+  "wall_seconds": 13.587949889999436,
+  "wall_per_iter": 0.13587949889999437,
+  "energy_ha": -80.3737840207928,
+  "fci_ha": -75.01243743249306
+}

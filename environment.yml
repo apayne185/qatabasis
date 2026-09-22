@@ -19,9 +19,21 @@ dependencies:
   - gxx_linux-64=13.*
   - pip
   - pip:
-      - qiskit>=1.0,<2.0
+      # qiskit>=1.0,<2.0 pin below was stale -- Dockerfile's pip path
+      # (verified 2026-09-22) resolves to qiskit==2.5.2 today, matching
+      # requirements.txt's >=2.5.2,<3.0, not this file's old <2.0 ceiling.
+      # Widened to match what's actually installable and verified working.
+      - qiskit>=2.5.2,<3.0
+      # This installs a CPU-only wheel first; scripts/install_native.sh
+      # force-reinstalls qiskit-aer==0.17.2 from source (CUDA-enabled)
+      # right after the CMake build step, once nvcc is confirmed present.
       - qiskit-aer>=0.14.0
-      - qiskit-aer-gpu; platform_system == "Linux"
+      # qiskit-aer-gpu (separate package) no longer exists on PyPI --
+      # confirmed via `pip index versions qiskit-aer-gpu` returning no
+      # distribution, 2026-09-22. GPU support now comes from building
+      # plain qiskit-aer with AER_THRUST_BACKEND=CUDA (see Dockerfile),
+      # not from a separate -gpu package. This line would make `conda env
+      # create` fail outright; removed rather than left broken.
       - qiskit-algorithms>=0.3.0
       - qiskit-nature>=0.7
       - qiskit-ibm-runtime>=0.20

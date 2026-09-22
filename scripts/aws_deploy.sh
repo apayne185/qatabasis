@@ -28,15 +28,32 @@ AWS_REGION="${AWS_REGION:-us-east-1}"
 INSTANCE_TYPE="${INSTANCE_TYPE:-g5.xlarge}"
 
 if [[ -z "${AWS_AMI:-}" ]]; then
-    echo "[deploy] resolving latest DL AMI in ${AWS_REGION}..."
+    echo "[deploy] resolving latest GPU-capable Ubuntu DL AMI in ${AWS_REGION}..."
+    # AWS renames/reversions this family often (e.g. dropped Ubuntu 22.04 for
+    # 24.04/26.04, retitled "GPU PyTorch" -> "OSS Nvidia Driver GPU"). Match
+    # loosely on "Deep Learning...GPU...Ubuntu" rather than an exact string so
+    # this doesn't silently break again on the next AWS rename -- this stack
+    # builds its own Docker image via `make build`, so the AMI only needs a
+    # working NVIDIA driver + Ubuntu base, not a specific preinstalled
+    # framework version.
     AWS_AMI=$(aws ec2 describe-images \
         --region "$AWS_REGION" \
         --owners amazon \
-        --filters "Name=name,Values=Deep Learning AMI GPU PyTorch*Ubuntu 22.04*" \
+        --filters "Name=name,Values=Deep Learning*GPU*Ubuntu*" \
                   "Name=state,Values=available" \
-        --query 'sort_by(Images, &CreationDate)[-1].ImageId' \
+        --query 'sort_by(Images, &CreationDate)[-1].[ImageId,Name]' \
         --output text)
-    echo "[deploy] AMI: $AWS_AMI"
+    AWS_AMI_NAME=$(echo "$AWS_AMI" | cut -f2-)
+    AWS_AMI=$(echo "$AWS_AMI" | cut -f1)
+    if [[ -z "$AWS_AMI" || "$AWS_AMI" == "None" ]]; then
+        echo "[deploy] ERROR: no matching AMI found. AWS may have renamed this" >&2
+        echo "         family again -- check available images with:" >&2
+        echo "         aws ec2 describe-images --region $AWS_REGION --owners amazon \\" >&2
+        echo "             --filters 'Name=name,Values=Deep Learning*GPU*' 'Name=state,Values=available' \\" >&2
+        echo "             --query 'sort_by(Images, &CreationDate)[-10:].[ImageId,Name]' --output table" >&2
+        exit 1
+    fi
+    echo "[deploy] AMI: $AWS_AMI ($AWS_AMI_NAME)"
 fi
 
 echo "[deploy] launching ${INSTANCE_TYPE} in ${AWS_REGION}..."

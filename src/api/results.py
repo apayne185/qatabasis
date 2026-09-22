@@ -33,25 +33,35 @@ def _hpc_cuda_build():
         return None
 
 
-def save_results(data: dict, backend: str, results_dir: str = "results", hw=None, stack=None) -> str:
+def save_results(data: dict, backend: str, results_dir: str = "results", hw=None, stack=None, path: str | None = None) -> str:
     # Save run results as JSON, returns the file path.
     # Files are organized results/<hardware-slug>/<backend-subdir>/ so runs
     # from different GPUs (or CPU-only) are never mixed in the same directory.
+    #
+    # Pass `path` to write/overwrite a specific file instead of minting a new
+    # timestamped one -- used for incremental saves during a long sweep, so a
+    # script interrupted mid-run (Ctrl+C, crash, terminated instance) still
+    # leaves the molecules that did finish on disk. See local_test_run.py's
+    # call sites: same path is reused across incremental saves, then the
+    # final save is just another call with that same path.
 
-    # Map backend to subdirectory
-    subdir_map = {
-        "simulator": "simulator",
-        "ibm_cloud": "ibm",
-        "serial_baseline": "baseline",
-    }
-    subdir = subdir_map.get(backend, backend)
-    slug = hw.results_slug() if hw is not None else "unsorted"
-    out_dir = os.path.join(results_dir, slug, subdir)
-    os.makedirs(out_dir, exist_ok=True)
+    if path is None:
+        # Map backend to subdirectory
+        subdir_map = {
+            "simulator": "simulator",
+            "ibm_cloud": "ibm",
+            "serial_baseline": "baseline",
+        }
+        subdir = subdir_map.get(backend, backend)
+        slug = hw.results_slug() if hw is not None else "unsorted"
+        out_dir = os.path.join(results_dir, slug, subdir)
+        os.makedirs(out_dir, exist_ok=True)
 
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"{backend}_{ts}.json"
-    path = os.path.join(out_dir, filename)
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"{backend}_{ts}.json"
+        path = os.path.join(out_dir, filename)
+    else:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
 
     payload = {
         "timestamp": datetime.now().isoformat(),
