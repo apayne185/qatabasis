@@ -50,6 +50,7 @@ are needed to switch hardware, backends, or workloads.
 | `VQE_LEGACY_EXPECT` | `1` \| unset | unset | Force the legacy CPU-side expectation path (GPU→CPU statevector copy + numpy) even at `NP=1`, where the GPU-native path is normally faster. Useful for A/B measurement or regression checks. |
 | `VQE_GPU_EXPECT_MPI` | `1` \| unset | unset | Force the GPU-native expectation path (`save_expectation_value`) even under MPI at `NP>=2`, where it is **not** the default due to a measured 3.6x per-iteration regression (per-rank Aer transpile cost amplifies when multiple ranks contend for one GPU). Only for validating a future fix — do not use for published results until that regression is resolved. |
 | `VQE_ACCEPT_COST` | `1` \| unset | unset | Required to proceed when the compute-cost pre-flight check (`vqe_optimize()`'s LARGE-COST WARNING) fires — i.e. per-iteration amplitude-touch cost exceeds ~1e11 (`2^num_qubits × n_pauli_terms`) or total Pauli evaluations exceed ~1e10. Without this set, the run aborts (all ranks, cleanly, before any real work starts) rather than silently committing to a many-hours-per-iteration run. Reducing `MAX_ITERS` alone does **not** avoid this — it only lowers total work, not per-iteration cost (e.g. CO2 at 30 qubits triggers this regardless of `MAX_ITERS`; see Tutorial 4 below). |
+| `RESUME` | `1` \| unset | unset | `benchmarks/local_test_run.py` only. Writes results to a seed-stable filename (`simulator_seed<N>.json`, no timestamp) and, on each molecule's completion, incrementally saves results-so-far to that same file rather than only at the very end. On restart with the same `SEED`, molecules already present in that file are skipped. Use for any multi-hour, multi-molecule sweep (e.g. NH3/N2 across several seeds) where an interrupt (Ctrl+C, crash, terminated cloud instance) would otherwise lose every completed molecule, not just the one in flight — see the `for seed in ...` pattern in Tutorial 3 below. |
 
 **GPU-native vs. legacy expectation routing**: the stack picks between two
 ways of computing Pauli expectation values on GPU (`_expectation_on_gpu` vs.
@@ -562,6 +563,20 @@ a GPU. `HardwareProfile` picks up the GPU class and enables
 
 Prints a median + [min, max] table across seeds. Use this pattern for
 publication-grade statistics.
+
+For large-molecule sweeps (e.g. NH3/N2, where a single seed can run for
+hours), add `RESUME=1` so an interrupted seed can pick back up instead of
+losing every molecule that already finished:
+
+    for s in 42 43 44 45 46; do
+        RESUME=1 SEED=$s MOLECULES="NH3 N2" make run NP=2
+    done
+
+If this is Ctrl+C'd or crashes partway through, say mid-N2 on seed 44,
+rerunning the exact same command resumes: NH3 (already saved) is skipped,
+and only N2 reruns. Without `RESUME=1`, an interrupt anywhere in the loop
+silently discards every molecule completed so far in that seed's process —
+see `docs/API.md`'s `RESUME` config-table entry above for the mechanism.
 
 ### Tutorial 4 — Hardware ceiling test (bigger molecule than the defaults)
 

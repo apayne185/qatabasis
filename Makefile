@@ -68,6 +68,7 @@ run:
 	  -e MOLECULES="$(MOLECULES)" \
 	  -e MAX_ITERS=$(MAX_ITERS) \
 	  -e VQE_PRECISION=$(VQE_PRECISION) \
+	  -e RESUME=$(RESUME) \
 	  -v "$$(pwd)/checkpoints:/workspace/checkpoints" \
 	  -v "$$(pwd)/results:/workspace/results" \
 	  $(IMAGE_NAME) \

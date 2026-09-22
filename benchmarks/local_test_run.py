@@ -1,5 +1,6 @@
 import sys
 import os
+import json
 import numpy as np
 import time
 from datetime import datetime
@@ -293,13 +294,39 @@ if __name__ == "__main__":
     os.makedirs(f"results/{_hw_slug}/simulator", exist_ok=True)
     init_log(f"results/{_hw_slug}/simulator/run_{ts}.log")
 
+    # RESUME=1 opts into a seed-stable filename (no timestamp) so a fresh
+    # process invocation (e.g. the next iteration of a `for seed in ...` loop
+    # after a crash) finds the SAME file a prior attempt at this seed wrote,
+    # instead of a timestamp making every restart invisible to the others.
+    # Molecules already present in that file are skipped -- for a multi-hour
+    # sweep (NH3/N2-scale problems), recomputing finished molecules after an
+    # interrupt wastes real cloud-GPU money, not just time. Default stays
+    # timestamped (old behavior) so this is opt-in, not a silent path change
+    # for existing tooling/scripts that expect the timestamped filename.
+    _resume = os.environ.get("RESUME", "").strip().lower() in {"1", "yes", "true"}
+    if _resume:
+        _results_path = f"results/{_hw_slug}/simulator/simulator_seed{SEED}.json"
+    else:
+        _results_path = f"results/{_hw_slug}/simulator/simulator_{ts}.json"
+
+    results = {}
+    if _resume and os.path.exists(_results_path):
+        with open(_results_path) as f:
+            _prior = json.load(f)
+        _prior_molecules = _prior.get("molecules", {})
+        _already_done = [m for m in MOLECULES if m in _prior_molecules]
+        if _already_done:
+            print(f"[Resume] Found prior results at {_results_path}, "
+                  f"skipping already-completed molecules: {_already_done}")
+            results.update(_prior_molecules)
+            MOLECULES = [m for m in MOLECULES if m not in _prior_molecules]
+
     print(f"[Config] GPU={'requested' if USE_GPU else 'CPU mode'}")
     print(f"[Config] Molecules: {MOLECULES}")
     print(f"[Config] Resolver: max_qubits=30, cache=.pubchem_cache/")
 
 
     with QatabasisStack(use_gpu=USE_GPU, backend=BACKEND) as stack:
-        results = {}
         for mol in MOLECULES:
             history, problem, t_total, theta = run_chemistry_local(stack, mol)
 
@@ -342,6 +369,22 @@ if __name__ == "__main__":
                         "history": history,
                     }
 
+                    # Incremental save: write results-so-far after every
+                    # molecule, not just once at the end. A multi-hour sweep
+                    # (e.g. NH3/N2 across several seeds) interrupted midway
+                    # through molecule N still leaves molecules 1..N-1 on
+                    # disk instead of losing the whole run.
+                    save_results({
+                        "mpi_ranks": stack.size,
+                        "gpu": stack.use_gpu,
+                        "seed": SEED,
+                        "molecules": results,
+                        "scaling": None,
+                        "weak_scaling": None,
+                        "finance": None,
+                        "partial": True,
+                    }, backend=BACKEND, hw=stack.hw, stack=stack, path=_results_path)
+
         # Finance problem - opt-in via RUN_FINANCE=1. Demonstrates the same
         # middleware running a non-chemistry workload (portfolio QUBO -> Ising).
         finance_result = None
@@ -377,7 +420,7 @@ if __name__ == "__main__":
                 "scaling": scaling_result,
                 "weak_scaling": weak_scaling_result,
                 "finance": finance_result,
-            }, backend=BACKEND, hw=stack.hw, stack=stack)
+            }, backend=BACKEND, hw=stack.hw, stack=stack, path=_results_path)
 
     close_log()
 
