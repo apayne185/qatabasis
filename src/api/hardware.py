@@ -26,6 +26,10 @@ _GPU_DATABASE: list[tuple[str, str, float]] = [
     ("A100", "datacenter", 1 / 2),
     ("H100", "datacenter", 1 / 2),
     ("V100", "datacenter", 1 / 2),
+    ("A10G", "workstation", 1 / 32),  # AWS g5.xlarge -- Ampere die, but fp64
+                                       # is crippled like A40, not full like
+                                       # A100/H100 despite being sold as
+                                       # "datacenter" hardware by AWS.
     ("A40", "workstation", 1 / 32),
     ("RTX 6000 Ada", "workstation", 1 / 64),
     ("RTX A6000", "workstation", 1 / 32),

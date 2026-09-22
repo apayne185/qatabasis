@@ -211,8 +211,12 @@ Probes:
 #### GPU database
 
 `_GPU_DATABASE` in `hardware.py` maps GPU-name substrings to
-`(class, fp64_ratio)` tuples. Currently covers: A100, H100, V100, A40,
+`(class, fp64_ratio)` tuples. Currently covers: A100, H100, V100, A10G, A40,
 RTX 6000 Ada, RTX A6000, RTX 4090/4080/3090/3080, GTX 1650/1660.
+
+Note: A10G (AWS g5.xlarge) classifies as `workstation`, not `datacenter`,
+despite AWS's own instance-family marketing — it shares A40's die and its
+crippled fp64:fp32 ratio (≈1/32), unlike full-fp64 A100/H100/V100.
 
 To add a new GPU, append a tuple like:
 
