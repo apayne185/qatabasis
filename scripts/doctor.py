@@ -34,6 +34,47 @@ def _fail(msg: str) -> None:
     FAILURES.append(msg)
 
 
+_CUDA_DRIVER_FLOOR = (560, 28)  # minimum host driver for the CUDA 12.6.3
+                                 # base image this stack's Dockerfile uses
+                                 # (NVIDIA's published minimum-driver
+                                 # requirement for that CUDA toolkit version)
+
+
+def _check_cuda_driver_floor() -> None:
+    import subprocess
+
+    try:
+        out = subprocess.run(
+            ["nvidia-smi", "--query-gpu=driver_version", "--format=csv,noheader"],
+            capture_output=True, text=True, timeout=3,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return  # already reported as "no GPU" by the caller
+    if out.returncode != 0 or not out.stdout.strip():
+        return
+
+    driver_str = out.stdout.strip().splitlines()[0]
+    try:
+        parts = tuple(int(p) for p in driver_str.split(".")[:2])
+    except ValueError:
+        _warn(f"Could not parse host driver version '{driver_str}' to check "
+              f"against the CUDA 12.6.3 minimum-driver requirement.")
+        return
+
+    if parts < _CUDA_DRIVER_FLOOR:
+        _warn(f"Host NVIDIA driver {driver_str} is older than "
+              f"{'.'.join(map(str, _CUDA_DRIVER_FLOOR))}, the minimum for "
+              f"CUDA 12.6.3 (this stack's Dockerfile base image). The "
+              f"container will still BUILD fine (driver isn't checked at "
+              f"build time) but CUDA context init may fail mid-run with a "
+              f"cryptic 'CUDA driver version is insufficient for CUDA "
+              f"runtime version' error. Update the host driver, or ask "
+              f"your cloud provider for an image with a newer one.")
+    else:
+        _ok(f"Host NVIDIA driver {driver_str} meets the CUDA 12.6.3 floor "
+            f"({'.'.join(map(str, _CUDA_DRIVER_FLOOR))}+)")
+
+
 def check_gpu() -> None:
     from src.api.hardware import HardwareProfile, _GPU_DATABASE
 
@@ -47,6 +88,7 @@ def check_gpu() -> None:
         return
 
     _ok(f"GPU detected: {hw.gpu_name} ({hw.gpu_memory_gb:.1f} GB)")
+    _check_cuda_driver_floor()
 
     if hw.gpu_class == "unknown":
         _warn(f"GPU '{hw.gpu_name}' is not in _GPU_DATABASE "
