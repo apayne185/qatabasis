@@ -37,6 +37,9 @@ _GPU_DATABASE: list[tuple[str, str, float]] = [
     ("RTX 6000 Ada", "workstation", 1 / 64),
     ("RTX A6000", "workstation", 1 / 32),
     ("L4", "workstation", 1 / 64),    # Ada Lovelace, small cloud inference card
+    ("T4", "workstation", 1 / 32),    # Turing, GCP/cloud inference card --
+                                       # deliberately crippled fp64 like the
+                                       # RTX-Ada/Ampere workstation tier
     ("RTX 4090", "consumer", 1 / 64),
     ("RTX 4080", "consumer", 1 / 64),
     ("RTX 3090", "consumer", 1 / 64),

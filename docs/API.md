@@ -220,12 +220,19 @@ Probes:
 #### GPU database
 
 `_GPU_DATABASE` in `hardware.py` maps GPU-name substrings to
-`(class, fp64_ratio)` tuples. Currently covers: A100, H100, V100, A10G, A40,
-RTX 6000 Ada, RTX A6000, RTX 4090/4080/3090/3080, GTX 1650/1660.
+`(class, fp64_ratio)` tuples. Currently covers: H200, B200, A100, H100, V100
+(datacenter); A10G, A40, L40S, RTX 6000 Ada, RTX A6000, L4, T4 (workstation);
+RTX 4090/4080/3090/3080, GTX 1650/1660 (consumer).
 
-Note: A10G (AWS g5.xlarge) classifies as `workstation`, not `datacenter`,
-despite AWS's own instance-family marketing — it shares A40's die and its
-crippled fp64:fp32 ratio (≈1/32), unlike full-fp64 A100/H100/V100.
+Note: several cloud-vendor "datacenter" GPU instance types classify as
+`workstation` here despite the vendor's own marketing — A10G (AWS
+g5.xlarge), L4 and T4 (GCP) all have deliberately crippled fp64:fp32
+throughput (≈1/32–1/64) unlike full-fp64 A100/H100/V100/H200/B200. Matters
+for cross-cloud precision comparisons: `VQE_PRECISION=auto` only selects
+fp64 by default on `datacenter`-class GPUs at ≥20 qubits, so a cross-cloud
+run against a Lambda A100 baseline needs `VQE_PRECISION=fp64` set
+explicitly on these — see `scripts/aws_deploy.sh`/`scripts/gcp_deploy.sh`'s
+own printed reminders.
 
 To add a new GPU, append a tuple like:
 
