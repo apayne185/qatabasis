@@ -112,6 +112,12 @@ ssh -i "$AWS_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
     ubuntu@"$PUBLIC_IP" \
     "cd ~/qatabasis && make build"
 
+echo "[deploy] running readiness check (make doctor)..."
+ssh -i "$AWS_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+    ubuntu@"$PUBLIC_IP" \
+    "cd ~/qatabasis && make doctor" \
+    || echo "[deploy] WARNING: make doctor reported issues — review before running the workload."
+
 echo "[deploy] running smoke test (make pytest)..."
 ssh -i "$AWS_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
     ubuntu@"$PUBLIC_IP" \
