@@ -55,7 +55,7 @@ build:
 # would see it. See scripts/doctor.py for what's actually checked.
 doctor:
 	@echo "[Make] Running readiness check ..."
-	docker run --rm \
+	@docker run --rm \
 	  $(GPU_FLAG) \
 	  -e IBM_QUANTUM_TOKEN="$(IBM_QUANTUM_TOKEN)" \
 	  -e IBM_QUANTUM_INSTANCE="$(IBM_QUANTUM_INSTANCE)" \
@@ -115,7 +115,7 @@ run-ibm:
 	@[ -n "$(IBM_QUANTUM_TOKEN)" ] || (echo "ERROR: IBM_QUANTUM_TOKEN not set in .env"; exit 1)
 	@[ -n "$(IBM_QUANTUM_INSTANCE)" ] || (echo "ERROR: IBM_QUANTUM_INSTANCE not set in .env"; exit 1)
 	@echo "[Make] Running $(NP) ranks -> IBM Quantum ($(IBM_QUANTUM_BACKEND)) ..."
-	docker run --rm \
+	@docker run --rm \
 	  $(GPU_FLAG) \
 	  -e BACKEND=ibm_cloud \
 	  -e USE_GPU=$(GPU_AVAILABLE) \
