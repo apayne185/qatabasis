@@ -238,7 +238,7 @@ def check_ibm() -> None:
         service = QiskitRuntimeService(channel="ibm_cloud", token=token, instance=instance)
         be = service.backend(backend)
         _ok(f"IBM backend '{backend}' reachable "
-            f"({be.num_qubits} qubits, operational={be.operational})")
+            f"({be.num_qubits} qubits, operational={be.status().operational})")
     except Exception as e:
         _fail(f"IBM backend '{backend}' not reachable: {e}")
 
