@@ -391,8 +391,19 @@ if __name__ == "__main__":
         if os.environ.get("RUN_FINANCE", "").strip() in {"1", "yes", "true"}:
             finance_result = run_finance_local(stack)
 
-        scaling_result = run_scaling_local(stack)
-        weak_scaling_result = run_weak_scaling(stack)
+        # Opt-in, same convention as RUN_FINANCE above. Previously unconditional:
+        # every local_test_run.py invocation -- including a plain molecule sweep
+        # like `SEED=44 MOLECULES=NH3` -- silently overwrote scaling_P<N>.txt /
+        # weak_scaling_P<N>.txt for whatever rank count P it happened to run at,
+        # clobbering dedicated scaling data with results from an unrelated run.
+        # Confirmed happening for real (not hypothetical) multiple times in one
+        # session: scaling_P2.txt and weak_scaling_P2.txt got overwritten by
+        # NH3 seed-sweep runs at P=2, and scaling_P16.txt by a P=16 NH3 run.
+        scaling_result = None
+        weak_scaling_result = None
+        if os.environ.get("RUN_SCALING", "").strip() in {"1", "yes", "true"}:
+            scaling_result = run_scaling_local(stack)
+            weak_scaling_result = run_weak_scaling(stack)
 
         if stack.rank == 0:
             print("\n\n\n---ALL LOCAL BENCHMARKS COMPLETE ----")

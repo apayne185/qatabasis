@@ -139,6 +139,7 @@ scaling:
 	    $(GPU_FLAG) \
 	    -e BACKEND=simulator \
 		-e USE_GPU=$(GPU_AVAILABLE) \
+	    -e RUN_SCALING=1 \
 	    -v "$$(pwd)/results:/workspace/results" \
 	    $(IMAGE_NAME) \
 	    mpirun --allow-run-as-root -np $$p python3 benchmarks/local_test_run.py \
