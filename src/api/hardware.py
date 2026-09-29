@@ -32,6 +32,16 @@ _GPU_DATABASE: list[tuple[str, str, float]] = [
                                        # is crippled like A40, not full like
                                        # A100/H100 despite being sold as
                                        # "datacenter" hardware by AWS.
+    ("A10", "workstation", 1 / 32),   # OCI VM.GPU.A10.1 -- same GA102 Ampere
+                                       # die as A10G, same crippled fp64
+                                       # ratio, just without AWS's "G" suffix
+                                       # in nvidia-smi's reported name. Listed
+                                       # after A10G/A100 -- longest-substring-
+                                       # first matching (see _detect_gpu())
+                                       # tries those first regardless of
+                                       # declaration order, but keeping A10
+                                       # last here avoids relying on that
+                                       # alone for a human skimming the list.
     ("A40", "workstation", 1 / 32),
     ("L40S", "workstation", 1 / 32),  # Ada Lovelace, crippled fp64 like A40/L40
     ("RTX 6000 Ada", "workstation", 1 / 64),

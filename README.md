@@ -42,6 +42,37 @@ verifies the GPU is actually visible *inside* a Docker container (not just
 to the host), and tells you explicitly which case you're in before you ever
 run `make build`. Idempotent — safe to re-run.
 
+#### One-command cloud GPU launch
+
+For AWS, GCP, or OCI specifically, a single script provisions the instance,
+uploads the repo, runs `cloud_bootstrap.sh` + `make build` + `make doctor` +
+`make pytest`, and prints the exact follow-up/teardown commands — no manual
+instance setup needed:
+
+```bash
+# AWS (needs AWS_KEY/AWS_KEY_NAME/AWS_SG — see scripts/aws_deploy.sh header)
+scripts/aws_deploy.sh
+
+# GCP (needs a project with billing enabled — see scripts/gcp_deploy.sh header)
+scripts/gcp_deploy.sh
+
+# OCI (needs OCI_COMPARTMENT_ID + ~/.oci/config — see scripts/oci_deploy.sh header)
+scripts/oci_deploy.sh
+```
+
+Each script is self-contained and documents its own required env vars at
+the top of the file. All three default to the cheapest single-GPU shape
+that historically has non-zero starting quota on a fresh account (still
+often 0 in practice — see each script's header for the exact shape/quota
+notes), and all three print a reminder to set `VQE_PRECISION=fp64`
+explicitly for any cross-cloud comparison against an A100 baseline, since
+these budget GPU tiers are workstation-class (crippled fp64 throughput)
+despite sometimes being marketed as "datacenter" instances.
+
+Lambda Cloud instances don't need a launch script (Lambda's own dashboard
+already provisions in one click) — just `bash scripts/cloud_bootstrap.sh`
+once connected, as shown above.
+
 ### Path B — Native conda on a bare-metal HPC (no Docker)
 
 ```bash
