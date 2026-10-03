@@ -23,12 +23,33 @@ from dataclasses import dataclass, field
 # Known GPU families: (substring, class, est. fp64:fp32 ratio)
 # Datacenter cards have full FP64 and do not benefit from mixed precision.
 _GPU_DATABASE: list[tuple[str, str, float]] = [
+    ("H200", "datacenter", 1 / 2),    # same Hopper die as H100, full fp64
+    ("B200", "datacenter", 1 / 2),    # Blackwell datacenter, full fp64
     ("A100", "datacenter", 1 / 2),
     ("H100", "datacenter", 1 / 2),
     ("V100", "datacenter", 1 / 2),
+    ("A10G", "workstation", 1 / 32),  # AWS g5.xlarge -- Ampere die, but fp64
+                                       # is crippled like A40, not full like
+                                       # A100/H100 despite being sold as
+                                       # "datacenter" hardware by AWS.
+    ("A10", "workstation", 1 / 32),   # OCI VM.GPU.A10.1 -- same GA102 Ampere
+                                       # die as A10G, same crippled fp64
+                                       # ratio, just without AWS's "G" suffix
+                                       # in nvidia-smi's reported name. Listed
+                                       # after A10G/A100 -- longest-substring-
+                                       # first matching (see _detect_gpu())
+                                       # tries those first regardless of
+                                       # declaration order, but keeping A10
+                                       # last here avoids relying on that
+                                       # alone for a human skimming the list.
     ("A40", "workstation", 1 / 32),
+    ("L40S", "workstation", 1 / 32),  # Ada Lovelace, crippled fp64 like A40/L40
     ("RTX 6000 Ada", "workstation", 1 / 64),
     ("RTX A6000", "workstation", 1 / 32),
+    ("L4", "workstation", 1 / 64),    # Ada Lovelace, small cloud inference card
+    ("T4", "workstation", 1 / 32),    # Turing, GCP/cloud inference card --
+                                       # deliberately crippled fp64 like the
+                                       # RTX-Ada/Ampere workstation tier
     ("RTX 4090", "consumer", 1 / 64),
     ("RTX 4080", "consumer", 1 / 64),
     ("RTX 3090", "consumer", 1 / 64),
@@ -105,7 +126,13 @@ class HardwareProfile:
         except (ValueError, IndexError):
             pass
 
-        for sub, cls_, ratio in _GPU_DATABASE:
+        # Longest substring first: some entries are substrings of others
+        # (e.g. "L4" is literally contained in "L40S") -- matching in
+        # declaration order would silently misclassify an L40S as an L4
+        # if the shorter entry ever ended up listed first. Sorting by
+        # length makes the match correct regardless of _GPU_DATABASE's
+        # own ordering.
+        for sub, cls_, ratio in sorted(_GPU_DATABASE, key=lambda e: -len(e[0])):
             if sub in self.gpu_name:
                 self.gpu_class = cls_
                 self.fp64_ratio = ratio

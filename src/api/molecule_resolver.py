@@ -158,9 +158,17 @@ class MoleculeResolver:
             return self._pubchem_dict_to_result(name,cached)
 
         try:
+            # Printed before the network call, not after -- on a
+            # network-restricted host (blocked egress, DNS blackhole) this
+            # can stall up to the request timeout (~10-25s, see
+            # _fetch_pubchem_geometry) before failing. Without this,
+            # that stall looks like the process silently hanging rather
+            # than a network attempt in progress.
+            print(f"[Resolver] '{name}' not in local registry/SMILES -- "
+                  f"trying PubChem network lookup...")
             geometry, metadata = self._fetch_pubchem_geometry(name)
             if geometry is None:
-                return None    
+                return None
             
             if cache_file:
                 with open(cache_file,'w') as f:

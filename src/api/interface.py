@@ -204,16 +204,20 @@ class QatabasisStack:
             max_fit = self.hw.max_qubits_fit(self.precision, mpi_size=self.size)
             extra = f" (GPU fits up to ~{max_fit} qubits at this precision)" if max_fit else ""
             print(f"[Stack] Precision: {self.precision} for {num_qubits}-qubit problem{extra}")
+            self._memory_risk_pending = False
             if self._gpu_sv and max_fit and num_qubits > max_fit:
                 ranks_per_gpu = -(-self.size // max(self.hw.gpu_count, 1))
                 print(
-                    f"[Stack] WARNING: {num_qubits}-qubit problem exceeds the estimated "
+                    f"[Stack] MEMORY WARNING: {num_qubits}-qubit problem exceeds the estimated "
                     f"~{max_fit}-qubit GPU capacity ({self.size} rank(s) across "
                     f"{self.hw.gpu_count} GPU(s), ~{ranks_per_gpu} rank(s) sharing each "
-                    f"card). This will likely be extremely slow (memory pressure/paging, "
-                    f"not a crash) rather than fail fast. Consider fewer ranks, "
-                    f"VQE_PRECISION=fp32, or a larger-memory GPU before waiting on this."
+                    f"card). Whether this pages/thrashes (slow but survives) or hard-crashes "
+                    f"with a CUDA out-of-memory error depends on this GPU/driver's memory "
+                    f"oversubscription support, which is not guaranteed across vendors -- "
+                    f"do not assume it will merely be slow. Consider fewer ranks, "
+                    f"VQE_PRECISION=fp32, or a larger-memory GPU before proceeding."
                 )
+                self._memory_risk_pending = True
 
             # Compute-cost pre-flight: SPSA needs 2 statevector builds per iter, and each
             # rank evaluates its Pauli-term slice against that statevector. Warns about
@@ -240,9 +244,10 @@ class QatabasisStack:
             else:
                 self._large_cost_pending = False
         else:
+            self._memory_risk_pending = False
             self._large_cost_pending = False
 
-        # The warning above used to only print and continue -- despite the code
+        # The warnings above used to only print and continue -- despite the code
         # comment claiming it "blocks the exact CO2 failure mode," nothing in
         # the control flow actually stopped execution. Gate on an explicit,
         # rank-uniform opt-in instead: rank 0's decision is broadcast so every
@@ -262,6 +267,20 @@ class QatabasisStack:
                 "vqe_optimize() aborted by the compute-cost pre-flight check "
                 "(see the LARGE-COST WARNING printed on rank 0). Set "
                 "VQE_ACCEPT_COST=1 to proceed anyway."
+            )
+
+        _memory_risk_flag = np.array([1 if getattr(self, "_memory_risk_pending", False) else 0], dtype=np.int32)
+        comm.Bcast(_memory_risk_flag, root=0)
+        if _memory_risk_flag[0] and os.environ.get("VQE_ACCEPT_MEMORY_RISK", "").strip() not in {"1", "yes", "true"}:
+            if self.rank == 0:
+                print(
+                    "[Stack] Refusing to start: set VQE_ACCEPT_MEMORY_RISK=1 to proceed "
+                    "anyway once you've reviewed the MEMORY WARNING above."
+                )
+            raise RuntimeError(
+                "vqe_optimize() aborted by the GPU-memory pre-flight check "
+                "(see the MEMORY WARNING printed on rank 0). Set "
+                "VQE_ACCEPT_MEMORY_RISK=1 to proceed anyway."
             )
 
         os.makedirs(checkpoint_dir, exist_ok=True)
@@ -304,6 +323,10 @@ class QatabasisStack:
         for loop_k in range(1, max_iterations +1):
             k = loop_k + start_iter
             stop_signal[0] = 0
+            # Declared on every rank (not just inside `if self.rank == 0:`
+            # below) since the Bcast that reads/writes it after the loop
+            # body must run on every rank -- see the comment at that Bcast.
+            _ckpt_failed = np.array([0], dtype=np.int32)
             _iter_t0 = _time.perf_counter()
 
             # START-of-iter heartbeat -- for problems where a single iter
@@ -398,13 +421,70 @@ class QatabasisStack:
                         print(f"Converged: energy spread over last 10 iters = {spread:.2e} < tol={tolerance}, at iteration {k}")
                         stop_signal[0] = 1
 
-                if k % 5 == 0:
+                # Adaptive checkpoint cadence: bound wall-clock time at risk
+                # on interrupt, not iteration count. A fixed "every 5 iters"
+                # is fine for small molecules (H2 at ~0.14s/iter loses under
+                # a second) but on a much slower workload -- a bigger
+                # molecule, a future non-chemistry application, UCCSD instead
+                # of HWE -- 5 iterations could be many minutes, and losing
+                # that on a crash is exactly the failure mode checkpointing
+                # exists to prevent. Target: never checkpoint so rarely that
+                # an interrupt risks more than ~_CKPT_MAX_SECONDS_AT_RISK of
+                # recomputation, and never retain so little history that a
+                # bad/corrupted latest checkpoint leaves no earlier fallback
+                # within ~_CKPT_MIN_HISTORY_SECONDS.
+                # Ceiling of 5 preserves the original fixed cadence as an
+                # upper bound: on fast workloads (small molecules, short
+                # smoke/diagnostic runs -- e.g. Experiment 6's 5-iteration
+                # resilience test, which hard-asserts a checkpoint exists at
+                # iteration 5) this never checkpoints LESS often than before,
+                # only more often as iterations get slower. Without this cap,
+                # a fast per-iter time would push the interval past
+                # max_iterations entirely and a short run would never
+                # checkpoint at all.
+                _CKPT_MAX_SECONDS_AT_RISK = 120.0   # cap time lost on interrupt
+                _CKPT_MIN_HISTORY_SECONDS = 600.0   # cap total rollback depth
+                _CKPT_INTERVAL_CEILING = 5          # never checkpoint less often than this
+                if _iter_wall_history:
+                    _median_iter_s = sorted(_iter_wall_history[-5:])[len(_iter_wall_history[-5:]) // 2]
+                    checkpoint_every = max(1, min(_CKPT_INTERVAL_CEILING,
+                                                   round(_CKPT_MAX_SECONDS_AT_RISK / max(_median_iter_s, 1e-6))))
+                    retain_n = max(5, min(50, round(_CKPT_MIN_HISTORY_SECONDS / (checkpoint_every * max(_median_iter_s, 1e-6)))))
+                else:
+                    checkpoint_every, retain_n = 5, 5   # no timing data yet (first iter) -- old default
+
+                if k % checkpoint_every == 0:
                     ckpt_path = os.path.join(checkpoint_dir, f"checkpoint_iter_{k:04d}.npy")
-                    np.save(ckpt_path, theta)
-                    print(f"[RESILIENCE] Iteration {k}: Global theta state checkpointed at path {ckpt_path}. ")
-                    existing = sorted(_glob.glob(os.path.join(checkpoint_dir, "checkpoint_iter_*.npy")))  # rotate: keep last 5
-                    for old in existing[:-5]:
-                        os.remove(old)
+                    try:
+                        np.save(ckpt_path, theta)
+                        print(f"[RESILIENCE] Iteration {k}: Global theta state checkpointed at path "
+                              f"{ckpt_path} (every {checkpoint_every} iters, retaining last {retain_n}). ")
+                        existing = sorted(_glob.glob(os.path.join(checkpoint_dir, "checkpoint_iter_*.npy")))
+                        for old in existing[:-retain_n]:
+                            os.remove(old)
+                    except OSError as e:
+                        print(f"[Stack] rank 0: checkpoint write failed at iteration {k}: {e}",
+                              file=sys.stderr, flush=True)
+                        _ckpt_failed[0] = 1
+
+            # A failed checkpoint write (disk full, permission error,
+            # unwritable mount) must not let rank 0 die inside the
+            # `if self.rank == 0:` block above while every other rank is
+            # about to block in the Bcast calls below -- that's a silent,
+            # indefinite hang with no timeout, the same divergent-collective
+            # failure mode the cost-preflight Bcast earlier in this method
+            # already guards against. This Bcast (and the check after it)
+            # must run on EVERY rank, not just rank 0 -- that's why it's
+            # outside the `if self.rank == 0:` block, mirroring theta/
+            # stop_signal's Bcasts immediately below.
+            comm.Bcast(_ckpt_failed, root=0)
+            if _ckpt_failed[0]:
+                raise RuntimeError(
+                    f"Checkpoint write failed on rank 0 at iteration {k} "
+                    f"(disk full, permission error, or unwritable "
+                    f"checkpoint_dir='{checkpoint_dir}') -- aborting all "
+                    f"ranks instead of hanging on the next collective call."
+                )
 
             comm.Bcast(theta, root=0)
             comm.Bcast(stop_signal, root=0)

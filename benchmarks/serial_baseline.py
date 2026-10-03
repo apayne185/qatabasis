@@ -148,6 +148,23 @@ if __name__ == "__main__":
     resolver = MoleculeResolver(max_qubits=30, allow_network=True,
                                 cache_dir=".pubchem_cache")
 
+    # Fixed path, reused for every incremental write below plus the final
+    # save. Serial baselines are the slowest thing this stack runs (N2 was
+    # excluded from the paper entirely for projecting >10h on one core) --
+    # writing only once at the very end means an interrupted run (Ctrl+C,
+    # crash, terminated cloud instance) loses every molecule that DID
+    # finish, not just the one in flight. Same fix as local_test_run.py.
+    out_path = f"{out_dir}/serial_baseline_{ts}.json"
+
+    def _save(results_so_far, partial):
+        with open(out_path, "w") as f:
+            json.dump({
+                "hostname": hostname,
+                "timestamp": ts,
+                "molecules": results_so_far,
+                "partial": partial,
+            }, f, indent=2)
+
     all_results = {}
     for name in mols:
         print(f"\n--- {name} (serial, no MPI) ---")
@@ -158,6 +175,8 @@ if __name__ == "__main__":
             print(f"[{name}] resolution/prepare failed: {e}")
             continue
         all_results[name] = serial_vqe(name, problem)
+        _save(all_results, partial=True)
+        print(f"[Results] Incremental save ({len(all_results)}/{len(mols)} molecules) to {out_path}")
 
     print(f"\n{'Molecule':<10} {'Energy (Ha)':<16} {'Error (Ha)':<14} "
           f"{'Iters':<8} {'Time(s)':<10} {'n_params':<10}")
@@ -166,8 +185,6 @@ if __name__ == "__main__":
         print(f"{name:<10} {d['energy']:<16.6f} {err:<14} "
               f"{d['iterations']:<8} {d['wall_time']:<10.2f} {d['num_params']:<10}")
 
-    out_path = f"{out_dir}/serial_baseline_{ts}.json"
-    with open(out_path, "w") as f:
-        json.dump({"hostname": hostname, "timestamp": ts, "molecules": all_results}, f, indent=2)
+    _save(all_results, partial=False)
     print(f"\n[Results] Saved to {out_path}")
     close_log()
