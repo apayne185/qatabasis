@@ -1,0 +1,7 @@
+name: "qatabasis CodeQL config"
+
+paths-ignore:
+  # FetchContent-downloaded dependency (CMakeLists.txt pulls nlohmann/json
+  # at configure time) -- not our code, don't scan or report findings in it.
+  - "build/_deps/**"
+  - "build/**"
