@@ -9,7 +9,7 @@ on:
     - cron: "0 6 * * 1"
 
 jobs:
-  analyze:
+  analyze-python:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -24,8 +24,58 @@ jobs:
         uses: github/codeql-action/init@v4
         with:
           languages: python
+          config-file: ./.github/codeql/codeql-config.yml
 
       - name: Perform CodeQL analysis
         uses: github/codeql-action/analyze@v4
         with:
           category: "/language:python"
+
+  analyze-cpp:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      security-events: write
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: cpp
+          config-file: ./.github/codeql/codeql-config.yml
+
+      # Bare-runner build, not the Docker image -- CodeQL's C++ extractor
+      # needs to trace compiler invocations directly, which is simpler on
+      # the runner than instrumenting a Docker build. No CUDA toolkit here,
+      # so CMakeLists.txt's own CUDA auto-detection (see top of that file)
+      # takes the CPU-only branch and compiles src/classical/cpu/kernel_stub.cpp
+      # instead of the real kernel.cu -- this means the actual CUDA kernel
+      # is NOT analyzed by this job. bridge.cpp/dispatcher.cpp/qpu_client.cpp
+      # (the pybind11 boundary code, where unsafe pointer/buffer handling
+      # risk concentrates) are covered.
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake \
+            libopenmpi-dev openmpi-bin \
+            libcurl4-openssl-dev libopenblas-dev \
+            python3.11 python3.11-dev libgfortran5 libgomp1
+
+      - name: Install pybind11
+        run: pip3 install pybind11
+
+      - name: Build hpc_core (CPU-only -- no CUDA toolkit on this runner)
+        run: |
+          mkdir -p build && cd build
+          cmake .. -DPython_EXECUTABLE=$(which python3.11)
+          make -j$(nproc)
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: "/language:cpp"
