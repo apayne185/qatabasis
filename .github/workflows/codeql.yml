@@ -57,17 +57,29 @@ jobs:
       # is NOT analyzed by this job. bridge.cpp/dispatcher.cpp/qpu_client.cpp
       # (the pybind11 boundary code, where unsafe pointer/buffer handling
       # risk concentrates) are covered.
+      # ubuntu-latest is now 24.04 ("noble"), whose default repos don't
+      # carry python3.11 at all (24.04 ships 3.12 by default) --
+      # CMakeLists.txt hard-pins find_package(Python 3.11 ...), so install
+      # the exact version via deadsnakes rather than loosen that pin (which
+      # is project build config, not CI-only, and unverified for any
+      # 3.11-specific API dependency in the C++ code).
       - name: Install build dependencies
         run: |
+          sudo add-apt-repository -y ppa:deadsnakes/ppa
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             build-essential cmake \
             libopenmpi-dev openmpi-bin \
             libcurl4-openssl-dev libopenblas-dev \
-            python3.11 python3.11-dev libgfortran5 libgomp1
+            python3.11 python3.11-dev python3.11-venv libgfortran5 libgomp1
 
-      - name: Install pybind11
-        run: pip3 install pybind11
+      # Must install into the 3.11 interpreter specifically, not the
+      # system default (3.12) -- CMakeLists.txt's pybind11_DIR resolution
+      # runs `${Python_EXECUTABLE} -c "import pybind11; ..."`, so pybind11
+      # has to be importable from the same interpreter CMake is told to use
+      # below, not just "a" python3 on PATH.
+      - name: Install pybind11 into Python 3.11
+        run: python3.11 -m ensurepip --upgrade && python3.11 -m pip install pybind11
 
       - name: Build hpc_core (CPU-only -- no CUDA toolkit on this runner)
         run: |
