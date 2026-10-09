@@ -8,6 +8,21 @@ on:
   workflow_dispatch:       # manual trigger — gates the ibm-qpu-test job below
 
 jobs:
+  secret-scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Gitleaks scan
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   build-and-test:
     runs-on: ubuntu-latest
     timeout-minutes: 20
