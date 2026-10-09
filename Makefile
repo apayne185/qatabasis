@@ -15,6 +15,8 @@ endif
 # probe twice with two different failure-detection strategies.
 GPU_PROBE_OUTPUT := $(shell docker run --rm --gpus all nvidia/cuda:12.2.0-base-ubuntu22.04 nvidia-smi 2>&1; echo "EXIT:$$?")
 GPU_AVAILABLE := $(if $(findstring EXIT:0,$(GPU_PROBE_OUTPUT)),yes,no)
+DOCKER_PERM_DENIED := $(if $(findstring permission denied,$(GPU_PROBE_OUTPUT)),yes,no)
+
 ifeq ($(GPU_AVAILABLE),yes)
   GPU_FLAG = --gpus all
   $(info [Make] GPU detected — CUDA acceleration enabled.)
@@ -26,7 +28,7 @@ else
   # Lambda instance this session. Check for the permission-denied
   # signature and point at the real fix instead of the misleading
   # "No GPU detected" message.
-  ifneq (,$(findstring permission denied,$(GPU_PROBE_OUTPUT)))
+  ifeq ($(DOCKER_PERM_DENIED),yes)
     $(info [Make] GPU probe failed with a Docker PERMISSION error, not necessarily)
     $(info [Make] a missing GPU. Run: bash scripts/cloud_bootstrap.sh)
     $(info [Make] Falling back to CPU mode for now.)
@@ -40,9 +42,26 @@ endif
         native-install native-trial native-run \
         slurm-trial slurm-run slurm-scaling slurm-weak-scaling slurm-ibm \
         slurm-multi-seed slurm-ibm-seeds aggregate-seeds aggregate-scaling \
-        backup-results
+        backup-results check-docker-perms
 
-build:
+# GUARD - every Docker-invoking target depends on this. A fresh cloud
+# instance's default user is never in the `docker` group yet, so `docker
+# build`/`docker run` fail with "permission denied ... docker.sock" --
+# and critically, this is the EXACT SAME error signature the GPU probe
+# above already detects and silently works around (by falling back to
+# CPU mode) rather than failing loudly. Without this guard, `make build`
+# "succeeds" at printing a hint buried above a raw Docker error, then
+# fails anyway -- costing real debugging time on a fresh Lambda instance.
+# This guard turns that into one unmissable stop with the actual fix.
+check-docker-perms:
+ifeq ($(DOCKER_PERM_DENIED),yes)
+	$(error [Make] Docker permission denied -- this user is not in the \
+`docker` group yet (common on a fresh cloud instance). Run: \
+bash scripts/cloud_bootstrap.sh -- then either reconnect over SSH or run \
+`newgrp docker` in this shell, and re-run this command.)
+endif
+
+build: check-docker-perms
 	@echo "[Make] Building Docker image '$(IMAGE_NAME)' ..."
 	docker build -t $(IMAGE_NAME) .
 	@echo "[Make] Build complete."
@@ -53,7 +72,7 @@ build:
 # Runs inside the container with the same --gpus flag `make trial`/`make
 # run` use, so GPU visibility is checked exactly as the real workload
 # would see it. See scripts/doctor.py for what's actually checked.
-doctor:
+doctor: check-docker-perms
 	@echo "[Make] Running readiness check ..."
 	@docker run --rm \
 	  $(GPU_FLAG) \
@@ -66,7 +85,7 @@ doctor:
 
 
 # DIAGNOSTIC - tests the 6 layers on simulator
-trial:
+trial: check-docker-perms
 	@echo "[Make] Running diagnostic trial (simulator, $(NP) ranks) ..."
 	docker run --rm \
 	  $(GPU_FLAG) \
@@ -78,7 +97,7 @@ trial:
 
 
 # RUN TEMPLATE SCRIPT
-example:
+example: check-docker-perms
 	@echo "[Make] Running template (simulator, $(NP) ranks) ..."
 	docker run --rm \
 	  $(GPU_FLAG) \
@@ -91,7 +110,7 @@ example:
 	  mpirun --allow-run-as-root -np $(NP) python3 template.py
 
 # FULL BENCHMARK - simualtor only
-run:
+run: check-docker-perms
 	@echo "[Make] Running full benchmark (simulator, $(NP) ranks) ..."
 	docker run --rm \
 	  $(GPU_FLAG) \
@@ -111,7 +130,7 @@ run:
 
 
 # # FULL BENCHMARK - IBM quantum QPU 
-run-ibm:
+run-ibm: check-docker-perms
 	@[ -n "$(IBM_QUANTUM_TOKEN)" ] || (echo "ERROR: IBM_QUANTUM_TOKEN not set in .env"; exit 1)
 	@[ -n "$(IBM_QUANTUM_INSTANCE)" ] || (echo "ERROR: IBM_QUANTUM_INSTANCE not set in .env"; exit 1)
 	@echo "[Make] Running $(NP) ranks -> IBM Quantum ($(IBM_QUANTUM_BACKEND)) ..."
@@ -130,7 +149,7 @@ run-ibm:
 
 
 # STRONG SCALAING SWEEP - simulator      
-scaling:
+scaling: check-docker-perms
 	@echo "[Make] Starting strong scaling analysis ..."
 	@mkdir -p results/scaling
 	@for p in 1 2 4 8; do \
@@ -153,7 +172,7 @@ scaling:
 # tier -- would need P=32 on the same single Docker host as everything
 # else, deeper into the shared-memory contention regime than any other
 # scaling data in the paper goes; deliberately left out, disclosed in text.
-weak-scaling:
+weak-scaling: check-docker-perms
 	@echo "[Make] Starting weak scaling analysis ..."
 	@mkdir -p results/scaling
 	@for p in 1 2 4 8 16; do \
@@ -179,7 +198,7 @@ weak-scaling:
 
 
 # SERIAL BASELINE - single-core Qiskit VQE for comparison (no MPI)
-baseline:
+baseline: check-docker-perms
 	@echo "[Make] Running serial Qiskit baseline (no MPI, no GPU) ..."
 	docker run --rm \
 	  -e USE_GPU=no \
@@ -219,7 +238,7 @@ molecules:
 	[print(f'{k:<8} {\"--\":<8} {v[\"fci_energy\"]:<14.4f} {v[\"description\"]}') for k, v in MOLECULE_REGISTRY.items()]"
 
 
-shell:
+shell: check-docker-perms
 	docker run --rm -it \
 	  $(GPU_FLAG) \
 	  -e BACKEND=simulator \
