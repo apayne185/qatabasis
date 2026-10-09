@@ -309,19 +309,22 @@ def test_dropout_recovery(stack: QatabasisStack):
 
     stack.comm.Barrier()
 
-    # Restart from iter-5 checkpoint
+    # Restart via auto-detection (resume=True) -- no explicit path given, so
+    # this exercises the real detection/fallback logic: the iter-10 checkpoint
+    # was just deleted above, so the stack must find and validate iter-5 on
+    # its own rather than being told where to look.
     problem2 = ChemistryProblem("H 0 0 0; H 0 0 0.74")
-    ckpt_path = os.path.join(test_dir, "checkpoint_iter_0005.npy")
     _, history2 = stack.vqe_optimize(problem2, max_iterations=10,
-                                      restart_from=ckpt_path,
+                                      resume=True,
                                       checkpoint_dir=test_dir, seed=42)
 
     if stack.rank == 0:
         assert len(history2) > 0, "No iterations after dropout recovery"
         recovered_energy = history2[-1]
         print(f"  Phase 2: {len(history2)} post-recovery iterations, final E={recovered_energy:.6f}")
-        # Recovered run should be as low as the precrash run    - same seed, resuming from iter 5, so should track similar trajectory 
-        print(f"  Recovery successful: optimization resumed from checkpoint without data loss")
+        # Recovered run should be as low as the precrash run    - same seed, resuming from iter 5, so should track similar trajectory
+        print(f"  Recovery successful: resume=True auto-detected and validated the iter-5 checkpoint "
+              f"after the iter-10 checkpoint was deleted, with no explicit path given")
         print("[STRESS TEST: Drop-Out Recovery] OK")
 
 

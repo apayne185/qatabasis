@@ -4,6 +4,7 @@ from src.api.hardware import HardwareProfile
 
 import glob as _glob
 import os
+import re
 import sys
 
 # Warn at import time if this is a CPU-only build
@@ -164,7 +165,35 @@ class QatabasisStack:
             return e_plus_local, e_minus_local
 
 
-    def vqe_optimize(self, problem: QuantumProblem, max_iterations:int=100, tolerance:float=1.6e-3, restart_from:str | None = None, checkpoint_dir: str = "checkpoints", start_iter: int = 0, seed: int | None = None) -> tuple[np.ndarray, list[float]]:
+    def _find_latest_valid_checkpoint(self, checkpoint_dir: str, num_params: int) -> str | None:
+        """Scan checkpoint_dir for the highest-iteration checkpoint whose
+        array shape matches num_params and isn't all-zero/NaN (a corrupted
+        or partially-written file). Falls back to the next-older candidate
+        if the newest one fails validation, recursing down to None (no
+        valid checkpoint found -> caller starts fresh)."""
+        candidates = sorted(
+            _glob.glob(os.path.join(checkpoint_dir, "checkpoint_iter_*.npy")),
+            key=lambda p: int(re.search(r'checkpoint_iter_(\d+)', p).group(1)),
+            reverse=True,
+        )
+        for path in candidates:
+            try:
+                theta = np.load(path)
+            except Exception as e:
+                print(f"[RESILIENCE] Checkpoint {path} failed to load ({e}), trying older checkpoint...")
+                continue
+            if theta.shape[0] != num_params:
+                print(f"[RESILIENCE] Checkpoint {path} has {theta.shape[0]} params, "
+                      f"expected {num_params} -- skipping, trying older checkpoint...")
+                continue
+            if not np.all(np.isfinite(theta)) or np.all(theta == 0):
+                print(f"[RESILIENCE] Checkpoint {path} is corrupted (NaN/Inf or all-zero) "
+                      f"-- skipping, trying older checkpoint...")
+                continue
+            return path
+        return None
+
+    def vqe_optimize(self, problem: QuantumProblem, max_iterations:int=100, tolerance:float=1.6e-3, restart_from:str | None = None, checkpoint_dir: str = "checkpoints", start_iter: int = 0, seed: int | None = None, resume: bool = False) -> tuple[np.ndarray, list[float]]:
         self._below_fci_warned = False
         # Reset best-physical-energy trackers per molecule -- otherwise a
         # multi-molecule run leaks the previous molecule's cached value into
@@ -289,12 +318,18 @@ class QatabasisStack:
         if self.rank == 0:
             checkpoint_path = (restart_from if restart_from and os.path.exists(restart_from) else None)
 
+            if checkpoint_path is None and resume:
+                checkpoint_path = self._find_latest_valid_checkpoint(checkpoint_dir, num_params)
+                if checkpoint_path:
+                    print(f"[RESILIENCE] resume=True: auto-detected latest valid checkpoint {checkpoint_path}")
+                else:
+                    print(f"[RESILIENCE] resume=True but no valid checkpoint found in {checkpoint_dir} -- starting fresh.")
+
             if checkpoint_path:
                 print(f"[RESILIENCE] Loading θ from {checkpoint_path}...")
                 theta = np.load(checkpoint_path).astype(np.float64)
                 if theta.shape[0] != num_params:
                     raise ValueError(f"Checkpoint has {theta.shape[0]} params but problem has {num_params} params ")
-                import re
                 match = re.search(r'checkpoint_iter_(\d+)', checkpoint_path)
                 if match and start_iter == 0:
                     start_iter= int(match.group(1))
