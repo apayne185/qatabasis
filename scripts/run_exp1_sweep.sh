@@ -1,0 +1,151 @@
+#!/usr/bin/env bash
+# Orchestrates Experiment 1's clean sweep: AerSimulator-CPU serial baseline
+# + MPI distributed at P=1 and P=2, 5 seeds per molecule (10 for LiH), run
+# in THREE separate batches so a long NH3 run can be safely interrupted
+# without re-paying for the cheaper molecules already saved:
+#
+#   Batch 1: H2, LiH, BeH2, H2O  (5 seeds each, LiH gets 10)
+#   Batch 2: NH3                 (5 seeds -- this is the expensive one,
+#                                  ~1024 iterations/seed; run separately so
+#                                  a 4+ hour sweep can be broken/resumed
+#                                  without losing batch 1's results)
+#   Batch 3: N2                  (1 seed only, per spec -- optional, see
+#                                  the prompt below before spending time on it)
+#
+# Each batch writes into the SAME results/<hw-slug>-exp1-clean-<date>/
+# folder, same git commit, same manifest -- no cross-session file-pairing
+# ambiguity. Background: qatabasis-internal/docs/RESULT_PROVENANCE.md,
+# "Experiment 1 root cause".
+#
+# Run this INSIDE the Docker container, from repo root:
+#   bash scripts/run_exp1_sweep.sh              # runs batch 1 only
+#   EXP1_BATCH=2 bash scripts/run_exp1_sweep.sh  # NH3 only
+#   EXP1_BATCH=3 bash scripts/run_exp1_sweep.sh  # N2 only
+#   EXP1_BATCH=all bash scripts/run_exp1_sweep.sh # all three, back to back
+#
+# Env vars:
+#   EXP1_BATCH   1, 2, 3, or all. Default: 1.
+#   SEEDS        Default: "42 43 44 45 46" (n=5; LiH auto-extends to n=10).
+#   N2_SEED      Default: 42 (single seed).
+
+set -eo pipefail   # NOT -u; conda/docker entrypoint scripts hit unset vars
+
+EXP1_BATCH="${EXP1_BATCH:-1}"
+SEEDS="${SEEDS:-42 43 44 45 46}"
+N2_SEED="${N2_SEED:-42}"
+
+HW_SLUG=$(python3 -c "
+import sys; sys.path.insert(0, '.')
+from src.api.hardware import HardwareProfile
+print(HardwareProfile.detect().results_slug())
+")
+OUT_DIR="results/${HW_SLUG}-exp1-clean-$(date +%Y-%m-%d)"
+mkdir -p "$OUT_DIR"
+
+run_batch() {
+    local label="$1"
+    local mols="$2"
+    local seeds="$3"
+    echo "=== Experiment 1 clean sweep -- batch: $label ==="
+    echo "[sweep] molecules: $mols"
+    echo "[sweep] seeds: $seeds"
+    echo
+
+    echo "[sweep] --- serial baseline, AerSimulator-CPU, P=1 ---"
+    MOLECULES="$mols" SEEDS="$seeds" python3 benchmarks/exp1_clean_sweep.py --mode serial
+    echo
+
+    echo "[sweep] --- distributed, P=1 ---"
+    MOLECULES="$mols" SEEDS="$seeds" mpirun --allow-run-as-root -np 1 \
+        python3 benchmarks/exp1_clean_sweep.py --mode distributed
+    echo
+
+    echo "[sweep] --- distributed, P=2 ---"
+    MOLECULES="$mols" SEEDS="$seeds" mpirun --allow-run-as-root -np 2 \
+        python3 benchmarks/exp1_clean_sweep.py --mode distributed
+    echo
+
+    echo "[sweep] batch '$label' complete. Results saved under $OUT_DIR/"
+}
+
+case "$EXP1_BATCH" in
+    1)
+        run_batch "1 (H2, LiH, BeH2, H2O)" "H2 LiH BeH2 H2O" "$SEEDS"
+        ;;
+    2)
+        echo "[sweep] NOTE: NH3 is the expensive molecule (~1024 iters/seed x 5"
+        echo "        seeds). If this is interrupted, batch 1's results are safe --"
+        echo "        this batch only adds NH3 into the existing files, it does not"
+        echo "        overwrite H2/LiH/BeH2/H2O. But NH3 itself is NOT seed-resumable"
+        echo "        mid-batch: exp1_clean_sweep.py recomputes every seed passed to"
+        echo "        it (no per-seed skip, unlike local_test_run.py's RESUME=1), so"
+        echo "        if this is interrupted partway through NH3's 5 seeds, re-set"
+        echo "        SEEDS to just the remaining seed numbers before re-running,"
+        echo "        rather than re-running all 5 and wasting GPU time on the ones"
+        echo "        already in distributed_P*.json / serial_baseline_aercpu.json."
+        echo
+        run_batch "2 (NH3)" "NH3" "$SEEDS"
+        ;;
+    3)
+        echo "[sweep] NOTE: N2 has no serial comparison in Experiment 1 regardless"
+        echo "        (projected single-core wall-clock > 10h, excluded by design)."
+        echo "        Only its distributed P=2 number is ever used. Confirm this is"
+        echo "        actually needed before spending Lambda time on it -- if a"
+        echo "        recent N2 distributed-only number already exists and is"
+        echo "        trusted, this batch may not be necessary at all."
+        echo
+        run_batch "3 (N2)" "N2" "$N2_SEED"
+        ;;
+    all)
+        run_batch "1 (H2, LiH, BeH2, H2O)" "H2 LiH BeH2 H2O" "$SEEDS"
+        run_batch "2 (NH3)" "NH3" "$SEEDS"
+        run_batch "3 (N2)" "N2" "$N2_SEED"
+        ;;
+    *)
+        echo "[sweep] ERROR: EXP1_BATCH must be 1, 2, 3, or all (got '$EXP1_BATCH')" >&2
+        exit 1
+        ;;
+esac
+
+GIT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo unknown)
+MANIFEST="$OUT_DIR/MANIFEST.md"
+if [ ! -f "$MANIFEST" ]; then
+    cat > "$MANIFEST" <<EOF
+# Experiment 1 clean sweep — manifest
+
+Generated by \`scripts/run_exp1_sweep.sh\`, one or more batches, same
+results folder. Serial leg uses AerSimulator(method='statevector',
+device='CPU') -- the same compiled engine as the distributed path, so a
+measured P=2-vs-P=1 speedup reflects MPI/Pauli-distribution only, not a
+Python-vs-compiled-engine confound (see benchmarks/exp1_clean_sweep.py's
+module docstring for the full history).
+
+Files (serial_baseline_aercpu.json / distributed_P1.json /
+distributed_P2.json) accumulate molecules across batches --
+exp1_clean_sweep.py reads whatever is already on disk at each of these
+paths before adding its own batch's molecules and saving again, so a
+later batch (e.g. NH3) does not overwrite an earlier one's (e.g. H2/LiH/
+BeH2/H2O) results.
+
+Use the git_commit recorded per batch below when citing any number from
+this sweep in the paper appendix -- if a later re-run has a different
+commit, it is NOT interchangeable with this one without re-checking
+num_params parity first (see RESULT_PROVENANCE.md Step 4).
+
+## Batches run
+EOF
+fi
+cat >> "$MANIFEST" <<EOF
+
+### Batch: $EXP1_BATCH
+- git_commit: $GIT_COMMIT
+- date: $(date -u +%Y-%m-%dT%H:%M:%SZ)
+- hostname: $(hostname)
+- seeds: $SEEDS (LiH auto-extends to +47..51, n=10 total)
+- N2 seed: $N2_SEED (single seed, no serial comparison)
+EOF
+
+echo
+echo "[sweep] batch '$EXP1_BATCH' done. Manifest: $OUT_DIR/MANIFEST.md"
+echo "[sweep] NEXT (if this was the last batch you need): copy results/ back"
+echo "        off the cloud instance before terminating it."

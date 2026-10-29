@@ -158,6 +158,21 @@ class HardwareProfile:
 
     def _detect_mpi(self) -> None:
         try:
+            # mpi4py.rc.initialize defaults to True -- importing mpi4py.MPI
+            # auto-inits MPI as an import side effect unless this is set
+            # first. interface.py sets it too, but only takes effect if
+            # interface.py is imported before any other mpi4py import. If
+            # HardwareProfile.detect() runs first (e.g. a script that
+            # checks hardware before constructing QatabasisStack), THIS
+            # import is the first one, auto-inits MPI, and QatabasisStack's
+            # later hpc_core.init_mpi() (MPI_Init_thread) then double-inits
+            # and aborts with "has attempted to initialize MPI more than
+            # once." Set it here too (idempotent, safe even if mpi4py is
+            # already imported/initialized elsewhere) so detection order
+            # never determines whether a later QatabasisStack() construction
+            # crashes.
+            import mpi4py
+            mpi4py.rc.initialize = False
             from mpi4py import MPI
             self.has_mpi = True
             # MPI may not be initialized yet (interface.py defers init to hpc_core.init_mpi).
