@@ -7,7 +7,7 @@
 # the 2026-09-22 verification this and it were both checked against.
 
 # Core quantum
-qiskit>=2.5.2,<3.0
+qiskit>=2.6.0,<3.0
 qiskit-nature>=0.8.0
 qiskit-ibm-runtime>=0.50.0
 pyscf>=2.14.0
