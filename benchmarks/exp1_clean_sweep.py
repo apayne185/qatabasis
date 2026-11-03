@@ -108,9 +108,22 @@ def _out_dir(hw_slug):
 
 
 def _seeds_for(molecule, base_seeds):
-    if molecule == "LiH":
+    # Experiment 1's spec calls for LiH's extra seeds (n=10 vs n=5 for the
+    # other molecules); Experiment 3 (strong/weak scaling) does NOT --
+    # its own methodology is single-seed (seed=42), deterministic
+    # simulator, "each configuration was executed once." Without this
+    # override, a scaling-sweep invocation of this script would silently
+    # run LiH 10x (wasting real GPU time re-running the same deterministic
+    # config) while every other molecule ran once -- caught in practice
+    # when launching a P=4 scaling run and finding LiH on seed 47 a few
+    # minutes in. EXP1_NO_LIH_EXTENSION=1 opts out for exactly that case.
+    if molecule == "LiH" and not _env_bool("EXP1_NO_LIH_EXTENSION"):
         return base_seeds + LIH_EXTRA_SEEDS
     return base_seeds
+
+
+def _env_bool(key):
+    return os.environ.get(key, "").strip().lower() in {"1", "yes", "true"}
 
 
 def run_serial(molecules, base_seeds, out_dir):

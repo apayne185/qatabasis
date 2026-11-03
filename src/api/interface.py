@@ -1,11 +1,36 @@
-import hpc_core     # compiled C++ pybind11 bridge (build/hpc_core.so)
-from src.api.problems import QuantumProblem
-from src.api.hardware import HardwareProfile
-
 import glob as _glob
 import os
 import re
 import sys
+
+# Cap BLAS/OpenMP threads to 1 per process, BEFORE numpy/scipy are ever
+# imported (import os.environ['OMP_NUM_THREADS'] etc. must be set before
+# the BLAS library is loaded -- it reads these once at load time, not
+# per-call). Without this, scipy.sparse's matrix-vector product (used by
+# the sparse-matvec expectation fix, see _evaluate_distributed_statevector)
+# dispatches to a multi-threaded BLAS backend that by default spawns one
+# thread per detected CPU core -- PER MPI RANK PROCESS. At P>=4 CPU-only
+# ranks on a 30-core host, that's up to ~120 BLAS threads contending for
+# 30 real cores, causing severe oversubscription. Measured real effect
+# (weak-scaling A/B, same host, 2026-11-03): BeH2 at P=4 went from
+# 167ms/iter (old, pure-Python expectation_value(), no BLAS dispatch) to
+# 320ms/iter (new, sparse matvec, BLAS oversubscribed) -- WORSE than the
+# code this was meant to speed up. With threads capped to 1 here, the
+# same config drops to 120ms/iter -- faster than old AND new-uncapped.
+# This has no real downside at P=1 either: the per-rank matvecs here are
+# small enough that multi-threading barely helps a single process, and a
+# correctness-preserving cap that protects every multi-rank CPU-only
+# config (weak scaling, any future P>1 CPU run) at zero real cost at P=1
+# is a better default than leaving it unset and hoping every future
+# invocation remembers to set it manually.
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+os.environ.setdefault("MKL_NUM_THREADS", "1")
+os.environ.setdefault("NUMEXPR_NUM_THREADS", "1")
+
+import hpc_core     # compiled C++ pybind11 bridge (build/hpc_core.so)
+from src.api.problems import QuantumProblem
+from src.api.hardware import HardwareProfile
 
 # Warn at import time if this is a CPU-only build
 if not hpc_core.cuda_build():
