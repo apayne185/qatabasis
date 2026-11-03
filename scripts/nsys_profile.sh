@@ -39,18 +39,49 @@ export MAX_ITERS="$MAX_ITERS"
 #               you spot Python overhead between kernel launches.
 # --stats=true: print a summary table at the end so you don't need the GUI
 #               to sanity-check the run before rsync-ing.
-nsys profile \
-    --trace=cuda,nvtx,mpi,osrt \
-    --sample=cpu \
-    --stats=true \
-    --output "$REPORT" \
-    --force-overwrite=true \
-    mpirun -np "$NP" \
+#
+# Two real, independent bugs were found and fixed here (2026-11-03) --
+# this script had apparently never produced a usable CUDA-trace capture:
+#
+# 1. `mpirun` had no `--allow-run-as-root` (every OTHER mpirun invocation
+#    in this repo's Makefile has it -- this script was the one exception).
+#    Inside the Docker container, the shell runs as root, so bare `mpirun`
+#    refuses to launch at all: prints its root-refusal warning and exits
+#    with ZERO ranks ever started. The `nsys profile` wrapping it still
+#    "succeeds" (it traced a real, near-instant process -- just one that
+#    did nothing), producing a tiny, empty-of-CUDA-data report with no
+#    error that points at the actual cause. First symptom noticed: a
+#    captured .nsys-rep's --stats=true output showed "SKIPPED: ... does
+#    not contain CUDA trace/kernel/memory data" for every CUDA table,
+#    despite the real underlying workload (NH3 at P=2) definitely using
+#    the GPU when run normally (confirmed separately, outside nsys).
+#
+# 2. Even with (1) fixed, nsys MUST be launched INSIDE the mpirun
+#    invocation (one nsys process per rank), not wrapped AROUND mpirun
+#    from the outside. mpirun forks its rank processes via fork+exec;
+#    nsys attached to the mpirun PID itself does not automatically trace
+#    those child processes' CUDA activity -- nsys --help's
+#    --trace-fork-before-exec flag note explains why: child-process
+#    tracing after fork is NOT automatic and is documented as relying on
+#    undefined behavior even when explicitly enabled. `mpirun -np N nsys
+#    profile ... python ...` instead gives each rank its own nsys
+#    instance tracing its own process directly -- the standard,
+#    documented pattern for MPI+CUDA profiling. --output gets a
+#    %q{OMPI_COMM_WORLD_RANK} suffix so rank 0 and rank 1 (etc.) each get
+#    a distinct, non-colliding report file instead of one rank's write
+#    clobbering the other's.
+mpirun --allow-run-as-root -np "$NP" \
+    nsys profile \
+        --trace=cuda,nvtx,mpi,osrt \
+        --sample=cpu \
+        --stats=true \
+        --output "${REPORT}_rank%q{OMPI_COMM_WORLD_RANK}" \
+        --force-overwrite=true \
         python -m benchmarks.local_test_run
 
 echo ""
 echo "[nsys] done."
-echo "[nsys] report: ${REPORT}.nsys-rep"
+echo "[nsys] reports: ${REPORT}_rank0.nsys-rep, ${REPORT}_rank1.nsys-rep, ..."
 echo "[nsys] rsync back to laptop before terminating the instance:"
 echo "  rsync -av <instance>:$(pwd)/${OUT_DIR}/ ${OUT_DIR}/"
-echo "[nsys] open with: nsight-sys ${REPORT}.nsys-rep"
+echo "[nsys] open with: nsight-sys ${REPORT}_rank0.nsys-rep"

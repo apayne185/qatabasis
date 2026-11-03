@@ -316,9 +316,18 @@ if __name__ == "__main__":
     _env_seeds = os.environ.get("SEEDS", "").strip()
     base_seeds = [int(s) for s in _env_seeds.split()] if _env_seeds else DEFAULT_SEEDS
 
-    from src.api.hardware import HardwareProfile
-    hw_slug = HardwareProfile.detect().results_slug()
-    out_dir = _out_dir(hw_slug)
+    # Deliberately NOT HardwareProfile.detect().results_slug() -- that
+    # returns "cpu-only" for the serial leg (which runs without --gpus all
+    # by design, since the point is a true CPU baseline) and the real GPU
+    # slug (e.g. "a100-sxm4-40gb") for the distributed legs, so the two
+    # modes would silently write into TWO DIFFERENT folders despite being
+    # part of the same sweep. This bit a real run (2026-10-29, NH3 batch):
+    # the serial leg landed in results/cpu-only-exp1-clean-.../, orphaned
+    # from the distributed legs' results/a100-sxm4-40gb-exp1-clean-.../,
+    # and had to be manually merged after the fact. The slug below is
+    # fixed per-experiment instead, independent of which leg is running.
+    HW_SLUG_OVERRIDE = os.environ.get("EXP1_HW_SLUG", "a100-sxm4-40gb")
+    out_dir = _out_dir(HW_SLUG_OVERRIDE)
     os.makedirs(out_dir, exist_ok=True)
 
     if args.mode == "serial":

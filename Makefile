@@ -39,6 +39,7 @@ endif
 
 
 .PHONY: build trial run run-ibm scaling baseline exp1-sweep clean shell test pytest doctor \
+        test-sparse-pauli-reuse \
         native-install native-trial native-run \
         slurm-trial slurm-run slurm-scaling slurm-weak-scaling slurm-ibm \
         slurm-multi-seed slurm-ibm-seeds aggregate-seeds aggregate-scaling \
@@ -251,6 +252,19 @@ test:
 # Runs inside Docker -- the host Python has no qiskit/pyscf install.
 pytest:
 	docker run --rm $(IMAGE_NAME) python3 -m pytest
+
+
+# CORRECTNESS CHECK for the SparsePauliOp-reuse caching fix (NH3/N2 P=2
+# slowdown mitigation, FUTURE_WORK.md #7.1) -- requires GPU, verifies
+# reusing one SparsePauliOp across save_expectation_value calls is
+# numerically safe before trusting the speed fix in interface.py.
+test-sparse-pauli-reuse: check-docker-perms
+	@echo "[Make] Running SparsePauliOp-reuse correctness check ..."
+	docker run --rm \
+	  $(GPU_FLAG) \
+	  $(IMAGE_NAME) \
+	  python3 tests/test_sparse_pauli_op_reuse.py
+	@echo "[Make] SparsePauliOp-reuse check complete."
 
 
 

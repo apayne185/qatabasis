@@ -136,7 +136,7 @@ class QatabasisStack:
                 return Statevector(bound_circuit)
 
 
-    def _expectation_on_gpu(self, bound_plus, bound_minus, local_terms):
+    def _expectation_on_gpu(self, bound_plus, bound_minus, local_op):
         # Compute <psi(theta_plus)|H_local|psi(theta_plus)> and the same for
         # theta_minus, without ever pulling the full 2^n statevector to CPU.
         #
@@ -150,8 +150,16 @@ class QatabasisStack:
         # bound_plus and bound_minus are single-use circuits (freshly bound
         # via assign_parameters), safe to mutate in place. Same rule as
         # _build_statevector: do NOT pass a shared template here.
+        #
+        # local_op is a PRE-BUILT SparsePauliOp, cached by the caller
+        # (_evaluate_distributed_statevector) across SPSA iterations rather
+        # than rebuilt here every call -- see that function's cache-reset
+        # comment, FUTURE_WORK.md #7.1, and
+        # tests/test_sparse_pauli_op_reuse.py for the correctness
+        # verification this reuse required before it could be trusted
+        # (reusing a SparsePauliOp across save_expectation_value calls was
+        # explicitly untested/flagged-risky before that test existed).
         with _nvtx_range(message="sv+expect", color="orange", domain="vqe"):
-            local_op = SparsePauliOp.from_list(local_terms)
             qubit_range = list(range(bound_plus.num_qubits))
             bound_plus.save_expectation_value(local_op, qubit_range, label="ev")
             bound_minus.save_expectation_value(local_op, qubit_range, label="ev")
@@ -199,6 +207,22 @@ class QatabasisStack:
         # multi-molecule run leaks the previous molecule's cached value into
         # the current one when its trajectory drops below FCI.
         for _attr in ("_best_physical_energy", "_best_physical_theta", "_best_physical_iter"):
+            if hasattr(self, _attr):
+                delattr(self, _attr)
+        # Reset per-problem hot-path caches (local Pauli partition, the
+        # SparsePauliOp built from it, its cached scipy-sparse matrix form,
+        # sorted ansatz parameters) -- same reason as the best-physical-
+        # energy reset above: these are only valid for the molecule this
+        # vqe_optimize() call is running, and must not leak into the next
+        # one in a multi-molecule sweep. Populated lazily on first use
+        # inside _evaluate_distributed_statevector / _expectation_on_gpu /
+        # _evaluate_ibm_estimator (see FUTURE_WORK.md #7.1 for the
+        # SparsePauliOp caching rationale, and the sparse-matrix-matvec
+        # fix's own comment in _evaluate_distributed_statevector for why
+        # _sparse_matrix_cache exists) rather than here, since
+        # num_qubits/pauli_terms aren't needed until then anyway.
+        for _attr in ("_local_terms_cache", "_sparse_pauli_op_cache",
+                      "_sparse_matrix_cache", "_sorted_params_cache"):
             if hasattr(self, _attr):
                 delattr(self, _attr)
         if seed is not None:
@@ -620,7 +644,21 @@ class QatabasisStack:
         theta_minus = combined_params[num_params:]
 
         ansatz = problem.ansatz_circuit
-        sorted_params = sorted(ansatz.parameters, key=lambda x: x.name)
+
+        # Per-problem hot-path caches (FUTURE_WORK.md #7.1): sorted_params,
+        # the local Pauli partition, and the SparsePauliOp built from it are
+        # all invariant across SPSA iterations for a given problem + rank
+        # count -- only the parameter VALUES change call to call. Rebuilding
+        # them from scratch every iteration, on every rank, is the measured
+        # root cause of the GPU-native-expectation-under-MPI regression
+        # (docs/GPU_EXPECTATION_FIX.md): when multiple ranks hit the same
+        # physical GPU simultaneously, this redundant per-rank work is what
+        # collides. Cached here (reset once per vqe_optimize() call, see the
+        # attribute-reset block near the top of that function) instead of
+        # recomputed on every call to this function.
+        if not hasattr(self, "_sorted_params_cache"):
+            self._sorted_params_cache = sorted(ansatz.parameters, key=lambda x: x.name)
+        sorted_params = self._sorted_params_cache
 
         # T_accel: statevector build + Pauli expectation  ("acceleration" work)
         t_accel_start = _time.perf_counter()
@@ -631,7 +669,29 @@ class QatabasisStack:
             {p: v for p, v in zip(sorted_params, theta_minus)})
 
         # Partition Pauli terms across MPI ranks (needed either path)
-        local_terms = self.partition(problem.pauli_terms)
+        if not hasattr(self, "_local_terms_cache"):
+            self._local_terms_cache = self.partition(problem.pauli_terms)
+        local_terms = self._local_terms_cache
+
+        # SparsePauliOp built once from this rank's (fixed) term list, reused
+        # across iterations instead of SparsePauliOp.from_list(local_terms)
+        # on every call (both the GPU-native and legacy paths below need it).
+        if not hasattr(self, "_sparse_pauli_op_cache"):
+            self._sparse_pauli_op_cache = (
+                SparsePauliOp.from_list(local_terms) if local_terms else None
+            )
+        local_op = self._sparse_pauli_op_cache
+
+        # Cached scipy-sparse matrix for the legacy path's expectation value
+        # (see the legacy branch below). Built once per problem, same
+        # lifetime as the caches above. Only used by the legacy path, but
+        # built here so it shares this function's single cache-reset point
+        # (vqe_optimize()'s per-problem reset block) rather than needing its
+        # own.
+        if not hasattr(self, "_sparse_matrix_cache"):
+            self._sparse_matrix_cache = (
+                local_op.to_matrix(sparse=True) if local_op is not None else None
+            )
 
         # Two evaluation paths:
         # - GPU path: Aer's save_expectation_value instruction runs the
@@ -668,14 +728,39 @@ class QatabasisStack:
 
         if _use_gpu_expect:
             e_plus_local, e_minus_local = self._expectation_on_gpu(
-                bound_plus, bound_minus, local_terms)
+                bound_plus, bound_minus, local_op)
         else:
             if len(local_terms) > 0:
                 sv_plus = self._build_statevector(bound_plus)
                 sv_minus = self._build_statevector(bound_minus)
-                local_op = SparsePauliOp.from_list(local_terms)
-                e_plus_local = float(sv_plus.expectation_value(local_op).real)
-                e_minus_local = float(sv_minus.expectation_value(local_op).real)
+                # Direct scipy-sparse matvec instead of
+                # SparsePauliOp.expectation_value() -- same math
+                # (<psi|H|psi> = psi^dagger (H @ psi)), but Qiskit's own
+                # implementation carries real, measured per-term-loop
+                # overhead that a single fused sparse matrix-vector product
+                # does not. Measured at NH3 scale (1529-term local
+                # partition, 16 qubits): Qiskit's path costs ~284ms/call,
+                # this costs ~38ms/call -- a 7.4x reduction, verified to
+                # machine precision (delta ~3.8e-13) in
+                # tests/test_sparse_expectation_value.py before being
+                # trusted here. This IS the measured root cause of NH3's
+                # P=2-vs-P=1 slowdown (the legacy/cpu-expect path's
+                # dominant cost, confirmed via direct Nsight profiling +
+                # isolated timing -- NOT MPI overhead, NOT GPU contention,
+                # which were both separately measured and ruled out as
+                # the dominant cost at this problem size).
+                # Gain shrinks at larger problem sizes (measured at N2
+                # scale, 20 qubits: only ~13% improvement, 612ms -> 534ms)
+                # -- the per-term-loop overhead this fix removes becomes a
+                # smaller fraction of the total once the matvec itself is
+                # memory-bandwidth-bound. N2-scale speedup needs a
+                # different fix (true distributed statevector, not
+                # expectation-algorithm tuning) -- see FUTURE_WORK.md #2.
+                sv_plus_data = sv_plus.data
+                sv_minus_data = sv_minus.data
+                sparse_matrix = self._sparse_matrix_cache
+                e_plus_local = float(np.real(np.vdot(sv_plus_data, sparse_matrix.dot(sv_plus_data))))
+                e_minus_local = float(np.real(np.vdot(sv_minus_data, sparse_matrix.dot(sv_minus_data))))
             else:
                 e_plus_local = 0.0
                 e_minus_local = 0.0
@@ -812,14 +897,34 @@ class QatabasisStack:
         t_accel_start = _time.perf_counter()
 
         ansatz = problem.ansatz_circuit
-        sorted_ansatz_params = sorted(ansatz.parameters, key=lambda x: x.name)
+        # Same per-problem caches as _evaluate_distributed_statevector (see
+        # that function's comment + FUTURE_WORK.md #7.1) -- reset once per
+        # vqe_optimize() call, populated lazily here on first use.
+        if not hasattr(self, "_sorted_params_cache"):
+            self._sorted_params_cache = sorted(ansatz.parameters, key=lambda x: x.name)
+        sorted_ansatz_params = self._sorted_params_cache
 
         bound_plus = ansatz.assign_parameters(
             {p: v for p, v in zip(sorted_ansatz_params, theta_plus)})
         bound_minus = ansatz.assign_parameters(
             {p: v for p, v in zip(sorted_ansatz_params, theta_minus)})
 
-        local_terms = self.partition(problem.pauli_terms)
+        if not hasattr(self, "_local_terms_cache"):
+            self._local_terms_cache = self.partition(problem.pauli_terms)
+        local_terms = self._local_terms_cache
+
+        if not hasattr(self, "_sparse_pauli_op_cache"):
+            self._sparse_pauli_op_cache = (
+                SparsePauliOp.from_list(local_terms) if local_terms else None
+            )
+        local_op = self._sparse_pauli_op_cache
+
+        # Same cached-sparse-matrix fix as _evaluate_distributed_statevector
+        # (see that function's comment for the measured rationale).
+        if not hasattr(self, "_sparse_matrix_cache"):
+            self._sparse_matrix_cache = (
+                local_op.to_matrix(sparse=True) if local_op is not None else None
+            )
 
         # Same GPU-native vs legacy dispatch as _evaluate_distributed_statevector,
         # including the MPI-safe default policy fixed 2026-09-04:
@@ -842,14 +947,20 @@ class QatabasisStack:
 
         if _use_gpu_expect:
             e_plus_sv_local, e_minus_sv_local = self._expectation_on_gpu(
-                bound_plus, bound_minus, local_terms)
+                bound_plus, bound_minus, local_op)
         else:
             sv_plus = self._build_statevector(bound_plus)
             sv_minus = self._build_statevector(bound_minus)
             if len(local_terms) > 0:
-                local_op = SparsePauliOp.from_list(local_terms)
-                e_plus_sv_local = float(sv_plus.expectation_value(local_op).real)
-                e_minus_sv_local = float(sv_minus.expectation_value(local_op).real)
+                # Same cached-sparse-matvec fix as
+                # _evaluate_distributed_statevector -- see that function's
+                # comment for the measured rationale and correctness
+                # verification.
+                sv_plus_data = sv_plus.data
+                sv_minus_data = sv_minus.data
+                sparse_matrix = self._sparse_matrix_cache
+                e_plus_sv_local = float(np.real(np.vdot(sv_plus_data, sparse_matrix.dot(sv_plus_data))))
+                e_minus_sv_local = float(np.real(np.vdot(sv_minus_data, sparse_matrix.dot(sv_minus_data))))
             else:
                 e_plus_sv_local = 0.0
                 e_minus_sv_local = 0.0
