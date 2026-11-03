@@ -258,6 +258,20 @@ class HardwareProfile:
         # Reserve ~25% for gates / Qiskit overhead, then split what's left
         # across however many ranks are sharing this physical GPU.
         usable = self.gpu_memory_gb * 0.75 * (1024 ** 3) / ranks_per_gpu
+        # Every SPSA iteration builds TWO full statevectors concurrently
+        # per rank (sv_plus and sv_minus, see interface.py's
+        # _build_statevector call sites in _evaluate_distributed_statevector
+        # / _evaluate_ibm_estimator) -- this formula previously budgeted for
+        # only one, silently predicting a "fits" verdict with zero real
+        # margin at the exact boundary. Confirmed as a real OOM, not a
+        # theoretical risk: CO2 (30q, fp32, mpi_size=2) was predicted to fit
+        # exactly at n=30 by the one-statevector formula, then was killed
+        # by the Linux OOM killer (signal 9) on its very first SPSA
+        # iteration -- the two-statevector real requirement exceeded what
+        # was actually available. Halving `usable` here instead of leaving
+        # it to a one-statevector assumption restores the margin this
+        # function's own warning message already implies it should have.
+        usable = usable / 2
         n = 0
         while (2 ** (n + 1)) * bytes_per_amp <= usable:
             n += 1
