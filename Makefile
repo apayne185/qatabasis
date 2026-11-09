@@ -38,7 +38,8 @@ else
 endif
 
 
-.PHONY: build trial run run-ibm scaling baseline clean shell test pytest doctor \
+.PHONY: build trial run run-ibm scaling baseline exp1-sweep clean shell test pytest doctor \
+        test-sparse-pauli-reuse \
         native-install native-trial native-run \
         slurm-trial slurm-run slurm-scaling slurm-weak-scaling slurm-ibm \
         slurm-multi-seed slurm-ibm-seeds aggregate-seeds aggregate-scaling \
@@ -208,6 +209,32 @@ baseline: check-docker-perms
 	@echo "[Make] Serial baseline complete."
 
 
+# EXPERIMENT 1 CLEAN SWEEP - AerSimulator-CPU serial baseline + distributed
+# P=1,2, 5 seeds/molecule (10 for LiH), all in one container session so
+# every file shares the same git_commit/hostname and there is no
+# cross-session file-pairing judgment call left for later. Run in batches
+# (EXP1_BATCH=1/2/3/all) so a multi-hour NH3 sweep can be safely
+# interrupted without re-paying for the cheaper molecules. See
+# qatabasis-internal/docs/RESULT_PROVENANCE.md ("Experiment 1 root cause")
+# for why this target exists instead of composing `baseline` + `scaling`
+# by hand, and scripts/run_exp1_sweep.sh for the batch breakdown.
+#   make exp1-sweep                  # batch 1: H2, LiH, BeH2, H2O
+#   make exp1-sweep EXP1_BATCH=2     # batch 2: NH3
+#   make exp1-sweep EXP1_BATCH=3     # batch 3: N2 (optional -- see script's note)
+EXP1_BATCH ?= 1
+exp1-sweep: check-docker-perms
+	@echo "[Make] Running Experiment 1 clean sweep, batch $(EXP1_BATCH) ..."
+	docker run --rm \
+	  $(GPU_FLAG) \
+	  -e USE_GPU=$(GPU_AVAILABLE) \
+	  -e EXP1_BATCH=$(EXP1_BATCH) \
+	  -v "$$(pwd)/results:/workspace/results" \
+	  -v "$$(pwd)/checkpoints:/workspace/checkpoints" \
+	  $(IMAGE_NAME) \
+	  bash scripts/run_exp1_sweep.sh
+	@echo "[Make] Experiment 1 clean sweep batch $(EXP1_BATCH) complete. See results/*-exp1-clean-*/MANIFEST.md"
+
+
 # RUN ALL TESTS- resolver + layer diagnostic
 test:
 	@echo "[Make] Running test suite ..."
@@ -225,6 +252,19 @@ test:
 # Runs inside Docker -- the host Python has no qiskit/pyscf install.
 pytest:
 	docker run --rm $(IMAGE_NAME) python3 -m pytest
+
+
+# CORRECTNESS CHECK for the SparsePauliOp-reuse caching fix (NH3/N2 P=2
+# slowdown mitigation, FUTURE_WORK.md #7.1) -- requires GPU, verifies
+# reusing one SparsePauliOp across save_expectation_value calls is
+# numerically safe before trusting the speed fix in interface.py.
+test-sparse-pauli-reuse: check-docker-perms
+	@echo "[Make] Running SparsePauliOp-reuse correctness check ..."
+	docker run --rm \
+	  $(GPU_FLAG) \
+	  $(IMAGE_NAME) \
+	  python3 tests/test_sparse_pauli_op_reuse.py
+	@echo "[Make] SparsePauliOp-reuse check complete."
 
 
 
