@@ -10,7 +10,7 @@
 qiskit>=2.6.0,<3.0
 qiskit-nature>=0.8.0
 qiskit-ibm-runtime>=0.51.0
-pyscf>=2.14.0
+pyscf>=2.15.0
 
 # HPC / parallel
 mpi4py>=4.1.2
