@@ -94,6 +94,15 @@ def _run_hpchybrid(molecule, max_iters, seed, out_dir):
         "wall_per_iter": wall / max(len(history), 1),
         "energy_ha": history[-1] if history else None,
         "fci_ha": getattr(problem, "fci_energy", None),
+        # Captured BEFORE stack.finalize() below -- _save()'s rank check
+        # must not call MPI.COMM_WORLD.Get_rank() itself after finalize()
+        # has run (MPI_FINALIZE makes Get_rank() disallowed by the
+        # standard and aborts the job; confirmed for real, not
+        # hypothetical: a fix attempt that re-derived rank post-finalize
+        # crashed every run with "MPI_Comm_rank() called after
+        # MPI_FINALIZE"). Captured once, here, while `stack.rank` is still
+        # valid, and threaded through to _save() instead.
+        "_mpi_rank": stack.rank,
     }
     stack.finalize() if hasattr(stack, "finalize") else None
     return payload
@@ -386,7 +395,51 @@ _DISPATCH = {
 }
 
 
+def _is_rank_zero_or_unmpi(payload):
+    # All three backends (hpchybrid via hpc_core, lightning via its own MPI
+    # variant, aer-mpi via Aer's internal PMPI integration) coordinate MPI
+    # themselves rather than through this script. Without this check,
+    # EVERY rank launched by an external `mpirun -np N` independently
+    # calls _save() with the same molecule/backend/near-identical
+    # timestamp, and multiple ranks opening the same path in "w" mode
+    # concurrently produces a truncated, doubly-written, invalid JSON
+    # file -- confirmed for real (not hypothetical): a 2026-11-03
+    # hpchybrid rerun at NP=2 hit this exact race and corrupted H2's
+    # output.
+    #
+    # hpchybrid's _run_hpchybrid() stamps "_mpi_rank" into the payload,
+    # captured from `stack.rank` BEFORE stack.finalize() runs -- this
+    # function must use that captured value rather than re-derive the
+    # rank itself via MPI.COMM_WORLD.Get_rank(), because by the time
+    # main() calls _save(), finalize() (hpc_core.finalize_mpi()) has
+    # already run for the hpchybrid path, and MPI_Comm_rank() after
+    # MPI_FINALIZE is disallowed by the MPI standard -- confirmed for
+    # real: an earlier version of this fix that checked rank live here
+    # crashed every single run with "MPI_Comm_rank() called after
+    # MPI_FINALIZE."
+    if "_mpi_rank" in payload:
+        return payload["_mpi_rank"] == 0
+    # lightning/aer-mpi never call hpc_core.init_mpi() or finalize_mpi()
+    # anywhere in this file (Aer/Lightning coordinate MPI internally, at
+    # the C++ level, invisible to this Python-level check) -- so a live
+    # mpi4py check here is safe for them: nothing finalizes what this
+    # checks. MPI.Is_initialized() == False covers the genuine
+    # single-process, no-mpirun invocation (this script's own first
+    # usage example), where "rank 0" is simply the only process that
+    # exists.
+    try:
+        from mpi4py import MPI
+        if not MPI.Is_initialized():
+            return True
+        return MPI.COMM_WORLD.Get_rank() == 0
+    except ImportError:
+        return True
+
+
 def _save(payload, out_dir, backend_slug, molecule):
+    if not _is_rank_zero_or_unmpi(payload):
+        return
+    payload = {k: v for k, v in payload.items() if k != "_mpi_rank"}
     os.makedirs(os.path.join(out_dir, backend_slug), exist_ok=True)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     path = os.path.join(out_dir, backend_slug, f"{molecule}_{ts}.json")

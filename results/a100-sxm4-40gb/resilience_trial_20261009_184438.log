@@ -1,0 +1,396 @@
+[Make] GPU detected — CUDA acceleration enabled.
+[Make] Running diagnostic trial (simulator, 2       						 ranks) ...
+docker run --rm \
+  --gpus all \
+  -e BACKEND=simulator \
+  -e USE_GPU=yes \
+  -v "$(pwd)/checkpoints:/workspace/checkpoints" \
+  vqe-mpi-gpu \
+ 	  mpirun --allow-run-as-root -np 2       						 python3 tests/test_layers_run.py       
+
+==========
+== CUDA ==
+==========
+
+CUDA Version 12.6.3
+
+Container image Copyright (c) 2016-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+
+This container image and its contents are governed by the NVIDIA Deep Learning Container License.
+By pulling and using the container, you accept the terms and conditions of this license:
+https://developer.nvidia.com/ngc/nvidia-deep-learning-container-license
+
+A copy of this license is made available in this container at /NGC-DL-CONTAINER-LICENSE for your convenience.
+
+[    0.00s] Log started
+[    0.00s] Log started
+[Stack] GPU statevector (cuStateVec) available
+[hw] NVIDIA A100-SXM4-40GB (datacenter, 40.0 GB, fp64:fp32≈0.500) | libs: aer-gpu, cuquantum | MPI=1 | backend=custatevec
+[Stack]  Initialized 2 MPI rank(s), GPU=enabled, SV_backend=GPU (cuStateVec), backend='simulator'
+
+============================================================
+LAYER 1: MPI Bridge
+============================================================
+Total MPI ranks: 2
+This rank: 0
+GPU enabled: True
+Backend target: simulator
+
+============================================================
+LAYER 1: MPI Bridge
+============================================================
+MPI Barrier: PASSED
+
+============================================================
+LAYER 2: Problem Preparation
+============================================================
+[Chemistry:custom] [+   0.0s] driver.run() -- PySCF electronic structure
+[LAYER 1] OK
+
+============================================================
+LAYER 2: Problem Preparation
+============================================================
+Building H2 molecule (smallest possible — fast to prepare) ...
+[Chemistry:custom] [+   0.0s] driver.run() -- PySCF electronic structure
+[Chemistry:custom] [+   0.1s] second_q_op() + JW mapping
+[Chemistry:custom] [+   0.1s] second_q_op() + JW mapping
+[Chemistry:custom] [+   0.1s] Hamiltonian: 15 Pauli terms, 4 qubits
+[Chemistry:custom] [+   0.1s] FCI ground-truth via PySCF
+[Chemistry:custom] [+   0.1s] Hamiltonian: 15 Pauli terms, 4 qubits
+[Chemistry:custom] [+   0.1s] FCI ground-truth via PySCF
+[Chemistry:custom] [+   0.3s] build_ansatz(tier=hwe_adaptive, reps=1) -- this is the slow one at high n
+[Chemistry:custom] [+   0.3s] build_ansatz(tier=hwe_adaptive, reps=1) -- this is the slow one at high n
+[Chemistry:custom] [+   0.3s] QASM3 serialization (24 params, 36 gates)
+[Chemistry:custom] [+   0.3s] QASM3 serialization (24 params, 36 gates)
+[Chemistry:custom] [+   0.3s] prepare() complete
+[Chemistry:custom] 15 Pauli terms, 4 qubits, 24 params, reps=1. FCI reference: -1.1373 Ha 
+[Ansatz] HWE (adaptive) (auto) | corr_score=0.342 | off_diag_ratio=0.056
+[Reason] score=0.342 in [0.25, 0.55). Moderate correlation (off_diag_ratio=0.056, zz_frac=0.667). Adaptive HWE with full entanglement recommended.
+[Chemistry:custom] [+   0.0s] driver.run() -- PySCF electronic structure
+[Chemistry:custom] [+   0.3s] prepare() complete
+[Chemistry:custom] 15 Pauli terms, 4 qubits, 24 params, reps=1. FCI reference: -1.1373 Ha 
+[Ansatz] HWE (adaptive) (auto) | corr_score=0.342 | off_diag_ratio=0.056
+[Reason] score=0.342 in [0.25, 0.55). Moderate correlation (off_diag_ratio=0.056, zz_frac=0.667). Adaptive HWE with full entanglement recommended.
+Pauli terms: 15
+Qubits: 4
+Variational params: 24
+ QASM length: 1194 chars
+
+  First 3 Pauli terms:
+IIII  :  -0.812171
+IIIZ  :  +0.171413
+IIZI  :  -0.223432
+[LAYER 2] OK
+[Chemistry:custom] [+   0.0s] driver.run() -- PySCF electronic structure
+[Chemistry:custom] [+   0.0s] second_q_op() + JW mapping
+[Chemistry:custom] [+   0.0s] second_q_op() + JW mapping
+[Chemistry:custom] [+   0.1s] Hamiltonian: 15 Pauli terms, 4 qubits
+[Chemistry:custom] [+   0.1s] FCI ground-truth via PySCF
+[Chemistry:custom] [+   0.1s] Hamiltonian: 15 Pauli terms, 4 qubits
+[Chemistry:custom] [+   0.1s] FCI ground-truth via PySCF
+[Chemistry:custom] [+   0.1s] build_ansatz(tier=hwe_adaptive, reps=1) -- this is the slow one at high n
+[Chemistry:custom] [+   0.1s] build_ansatz(tier=hwe_adaptive, reps=1) -- this is the slow one at high n
+[Chemistry:custom] [+   0.1s] QASM3 serialization (24 params, 36 gates)
+[Chemistry:custom] [+   0.1s] QASM3 serialization (24 params, 36 gates)
+[Chemistry:custom] [+   0.1s] prepare() complete
+[Chemistry:custom] 15 Pauli terms, 4 qubits, 24 params, reps=1. FCI reference: -1.1373 Ha 
+[Ansatz] HWE (adaptive) (auto) | corr_score=0.342 | off_diag_ratio=0.056
+[Reason] score=0.342 in [0.25, 0.55). Moderate correlation (off_diag_ratio=0.056, zz_frac=0.667). Adaptive HWE with full entanglement recommended.
+
+============================================================
+LAYER 3: C++ Dispatcher (single dispatch)
+============================================================
+
+============================================================
+LAYER 4: VQE Loop (H2, 10 iterations)
+============================================================
+[Chemistry:custom] [+   0.0s] driver.run() -- PySCF electronic structure
+[Chemistry:custom] [+   0.1s] prepare() complete
+[Chemistry:custom] 15 Pauli terms, 4 qubits, 24 params, reps=1. FCI reference: -1.1373 Ha 
+[Ansatz] HWE (adaptive) (auto) | corr_score=0.342 | off_diag_ratio=0.056
+[Reason] score=0.342 in [0.25, 0.55). Moderate correlation (off_diag_ratio=0.056, zz_frac=0.667). Adaptive HWE with full entanglement recommended.
+
+============================================================
+LAYER 3: C++ Dispatcher (single dispatch)
+============================================================
+Layer 3 dispatcher.execute() is guarded behind VQE_ALLOW_MEANFIELD=1
+(mean-field approximation, diagnostic-only). Skipping single-dispatch call.
+[LAYER 3] SKIPPED (opt-in guard active)
+
+============================================================
+LAYER 4: VQE Loop (H2, 10 iterations)
+============================================================
+[Chemistry:custom] [+   0.0s] driver.run() -- PySCF electronic structure
+[Chemistry:custom] [+   0.0s] second_q_op() + JW mapping
+[Chemistry:custom] [+   0.0s] second_q_op() + JW mapping
+[Chemistry:custom] [+   0.0s] Hamiltonian: 15 Pauli terms, 4 qubits
+[Chemistry:custom] [+   0.0s] FCI ground-truth via PySCF
+[Chemistry:custom] [+   0.1s] Hamiltonian: 15 Pauli terms, 4 qubits
+[Chemistry:custom] [+   0.1s] FCI ground-truth via PySCF
+[Chemistry:custom] [+   0.1s] build_ansatz(tier=hwe_adaptive, reps=1) -- this is the slow one at high n
+[Chemistry:custom] [+   0.1s] build_ansatz(tier=hwe_adaptive, reps=1) -- this is the slow one at high n
+[Chemistry:custom] [+   0.1s] QASM3 serialization (24 params, 36 gates)
+[Chemistry:custom] [+   0.1s] prepare() complete
+[Chemistry:custom] 15 Pauli terms, 4 qubits, 24 params, reps=1. FCI reference: -1.1373 Ha 
+[Ansatz] HWE (adaptive) (auto) | corr_score=0.342 | off_diag_ratio=0.056
+[Reason] score=0.342 in [0.25, 0.55). Moderate correlation (off_diag_ratio=0.056, zz_frac=0.667). Adaptive HWE with full entanglement recommended.
+[Chemistry:custom] [+   0.1s] QASM3 serialization (24 params, 36 gates)
+[Chemistry:custom] [+   0.1s] prepare() complete
+[Chemistry:custom] 15 Pauli terms, 4 qubits, 24 params, reps=1. FCI reference: -1.1373 Ha 
+[Ansatz] HWE (adaptive) (auto) | corr_score=0.342 | off_diag_ratio=0.056
+[Reason] score=0.342 in [0.25, 0.55). Moderate correlation (off_diag_ratio=0.056, zz_frac=0.667). Adaptive HWE with full entanglement recommended.
+[Stack] Precision: fp64 for 4-qubit problem (GPU fits up to ~29 qubits at this precision)
+Iter 0001/10 | E: -0.042893 | Δ: inf | M: 12.7844 | iter=  0.02s | ETA: 0m00s | Path: GPU-cuStateVec+cpu-expect MPI-distributed (2 ranks)
+Iter 0002/10 | E: -0.047140 | Δ: 4.25e-03 | M: 11.7173 | iter=  0.01s | ETA: 0m00s | Path: GPU-cuStateVec+cpu-expect MPI-distributed (2 ranks)
+Iter 0003/10 | E: -0.043989 | Δ: 3.15e-03 | M: 328.8416 | iter=  0.01s | ETA: 0m00s | Path: GPU-cuStateVec+cpu-expect MPI-distributed (2 ranks)
+Iter 0004/10 | E: -0.051979 | Δ: 7.99e-03 | M: 397.3577 | iter=  0.01s | ETA: 0m00s | Path: GPU-cuStateVec+cpu-expect MPI-distributed (2 ranks)
+Iter 0005/10 | E: -0.050203 | Δ: 1.78e-03 | M: 15.4901 | iter=  0.01s | ETA: 0m00s | Path: GPU-cuStateVec+cpu-expect MPI-distributed (2 ranks)
+[RESILIENCE] Iteration 5: Global theta state checkpointed at path checkpoints/checkpoint_iter_0005.npy (every 5 iters, retaining last 50). 
+Iter 0006/10 | E: -0.060903 | Δ: 1.07e-02 | M: 381.2040 | iter=  0.01s | ETA: 0m00s | Path: GPU-cuStateVec+cpu-expect MPI-distributed (2 ranks)
+Iter 0007/10 | E: -0.070256 | Δ: 9.35e-03 | M: 11.5816 | iter=  0.01s | ETA: 0m00s | Path: GPU-cuStateVec+cpu-expect MPI-distributed (2 ranks)
+Iter 0008/10 | E: -0.085373 | Δ: 1.51e-02 | M: 11.5058 | iter=  0.01s | ETA: 0m00s | Path: GPU-cuStateVec+cpu-expect MPI-distributed (2 ranks)
+Iter 0009/10 | E: -0.149485 | Δ: 6.41e-02 | M: 11.7070 | iter=  0.01s | ETA: 0m00s | Path: GPU-cuStateVec+cpu-expect MPI-distributed (2 ranks)
+Iter 0010/10 | E: -0.161448 | Δ: 1.20e-02 | M: 11.8065 | iter=  0.01s | ETA: 0m00s | Path: GPU-cuStateVec+cpu-expect MPI-distributed (2 ranks)
+[RESILIENCE] Iteration 10: Global theta state checkpointed at path checkpoints/checkpoint_iter_0010.npy (every 5 iters, retaining last 50). 
+
+============================================================
+
+  Iterations run: 10
+Initial energy: -0.042893 Ha
+LAYER 6: Checkpoint Resilience
+============================================================
+[Chemistry:custom] [+   0.0s] driver.run() -- PySCF electronic structure
+Final energy: -0.161448 Ha
+Energy change: -0.118554 Ha
+Wall time: 0.16 s
+Time per iter: 0.02 s
+[LAYER 4] OK
+
+============================================================
+LAYER 6: Checkpoint Resilience
+============================================================
+[Chemistry:custom] [+   0.0s] driver.run() -- PySCF electronic structure
+[Chemistry:custom] [+   0.0s] second_q_op() + JW mapping
+[Chemistry:custom] [+   0.0s] second_q_op() + JW mapping
+[Chemistry:custom] [+   0.1s] Hamiltonian: 15 Pauli terms, 4 qubits
+[Chemistry:custom] [+   0.1s] FCI ground-truth via PySCF
+[Chemistry:custom] [+   0.1s] Hamiltonian: 15 Pauli terms, 4 qubits
+[Chemistry:custom] [+   0.1s] FCI ground-truth via PySCF
+[Chemistry:custom] [+   0.1s] build_ansatz(tier=hwe_adaptive, reps=1) -- this is the slow one at high n
+[Chemistry:custom] [+   0.1s] build_ansatz(tier=hwe_adaptive, reps=1) -- this is the slow one at high n
+[Chemistry:custom] [+   0.1s] QASM3 serialization (24 params, 36 gates)
+[Chemistry:custom] [+   0.1s] QASM3 serialization (24 params, 36 gates)
+[Chemistry:custom] [+   0.1s] prepare() complete
+[Chemistry:custom] 15 Pauli terms, 4 qubits, 24 params, reps=1. FCI reference: -1.1373 Ha 
+[Ansatz] HWE (adaptive) (auto) | corr_score=0.342 | off_diag_ratio=0.056
+[Reason] score=0.342 in [0.25, 0.55). Moderate correlation (off_diag_ratio=0.056, zz_frac=0.667). Adaptive HWE with full entanglement recommended.
+[Chemistry:custom] [+   0.1s] prepare() complete
+[Chemistry:custom] 15 Pauli terms, 4 qubits, 24 params, reps=1. FCI reference: -1.1373 Ha 
+[Ansatz] HWE (adaptive) (auto) | corr_score=0.342 | off_diag_ratio=0.056
+[Reason] score=0.342 in [0.25, 0.55). Moderate correlation (off_diag_ratio=0.056, zz_frac=0.667). Adaptive HWE with full entanglement recommended.
+[Stack] Precision: fp64 for 4-qubit problem (GPU fits up to ~29 qubits at this precision)
+Iter 0001/5 | E: -0.034091 | Δ: inf | M: 12.6822 | iter=  0.01s | ETA: 0m00s | Path: GPU-cuStateVec+cpu-expect MPI-distributed (2 ranks)
+Iter 0002/5 | E: -0.033713 | Δ: 3.78e-04 | M: 11.5322 | iter=  0.01s | ETA: 0m00s | Path: GPU-cuStateVec+cpu-expect MPI-distributed (2 ranks)
+Iter 0003/5 | E: -0.032462 | Δ: 1.25e-03 | M: 395.1462 | iter=  0.01s | ETA: 0m00s | Path: GPU-cuStateVec+cpu-expect MPI-distributed (2 ranks)
+Iter 0004/5 | E: -0.023066 | Δ: 9.40e-03 | M: 298.8128 | iter=  0.01s | ETA: 0m00s | Path: GPU-cuStateVec+cpu-expect MPI-distributed (2 ranks)
+Iter 0005/5 | E: -0.036019 | Δ: 1.30e-02 | M: 451.8136 | iter=  0.01s | ETA: 0m00s | Path: GPU-cuStateVec+cpu-expect MPI-distributed (2 ranks)
+[RESILIENCE] Iteration 5: Global theta state checkpointed at path checkpoints/_resilience_test/checkpoint_iter_0005.npy (every 5 iters, retaining last 50). 
+[Chemistry:custom] [+   0.0s] driver.run() -- PySCF electronic structure
+Checkpoint file: checkpoints/_resilience_test/checkpoint_iter_0005.npy
+Saved theta shape: (24,)
+Saved theta[:3]: [-0.08092103 -0.02157942 -0.00462588]
+
+  Restarting from checkpoint... 
+[Chemistry:custom] [+   0.0s] driver.run() -- PySCF electronic structure
+[Chemistry:custom] [+   0.0s] second_q_op() + JW mapping
+[Chemistry:custom] [+   0.0s] second_q_op() + JW mapping
+[Chemistry:custom] [+   0.1s] Hamiltonian: 15 Pauli terms, 4 qubits
+[Chemistry:custom] [+   0.1s] Hamiltonian: 15 Pauli terms, 4 qubits
+[Chemistry:custom] [+   0.1s] FCI ground-truth via PySCF
+[Chemistry:custom] [+   0.1s] FCI ground-truth via PySCF
+[Chemistry:custom] [+   0.1s] build_ansatz(tier=hwe_adaptive, reps=1) -- this is the slow one at high n
+[Chemistry:custom] [+   0.1s] build_ansatz(tier=hwe_adaptive, reps=1) -- this is the slow one at high n
+[Chemistry:custom] [+   0.1s] QASM3 serialization (24 params, 36 gates)
+[Chemistry:custom] [+   0.1s] QASM3 serialization (24 params, 36 gates)
+[Chemistry:custom] [+   0.1s] prepare() complete
+[Chemistry:custom] 15 Pauli terms, 4 qubits, 24 params, reps=1. FCI reference: -1.1373 Ha 
+[Chemistry:custom] [+   0.1s] prepare() complete
+[Chemistry:custom] 15 Pauli terms, 4 qubits, 24 params, reps=1. FCI reference: -1.1373 Ha 
+[Ansatz] HWE (adaptive) (auto) | corr_score=0.342 | off_diag_ratio=0.056
+[Reason] score=0.342 in [0.25, 0.55). Moderate correlation (off_diag_ratio=0.056, zz_frac=0.667). Adaptive HWE with full entanglement recommended.
+[Ansatz] HWE (adaptive) (auto) | corr_score=0.342 | off_diag_ratio=0.056
+[Reason] score=0.342 in [0.25, 0.55). Moderate correlation (off_diag_ratio=0.056, zz_frac=0.667). Adaptive HWE with full entanglement recommended.
+[Stack] Precision: fp64 for 4-qubit problem (GPU fits up to ~29 qubits at this precision)
+[RESILIENCE] Loading θ from checkpoints/_resilience_test/checkpoint_iter_0005.npy...
+[RESILIENCE] Resuming SPSA schedle from iteration 5  
+Iter 0006/5 | E: -0.040576 | Δ: inf | M: 290.0899 | iter=  0.01s | ETA: 0m00s | Path: GPU-cuStateVec+cpu-expect MPI-distributed (2 ranks)
+Iter 0007/5 | E: -0.041071 | Δ: 4.94e-04 | M: 442.4173 | iter=  0.01s | ETA: 0m00s | Path: GPU-cuStateVec+cpu-expect MPI-distributed (2 ranks)
+Iter 0008/5 | E: -0.042862 | Δ: 1.79e-03 | M: 10.5375 | iter=  0.01s | ETA: 0m00s | Path: GPU-cuStateVec+cpu-expect MPI-distributed (2 ranks)
+Iter 0009/5 | E: -0.045865 | Δ: 3.00e-03 | M: 420.4989 | iter=  0.01s | ETA: 0m00s | Path: GPU-cuStateVec+cpu-expect MPI-distributed (2 ranks)
+Iter 0010/5 | E: -0.031895 | Δ: 1.40e-02 | M: 11.5620 | iter=  0.01s | ETA: 0m00s | Path: GPU-cuStateVec+cpu-expect MPI-distributed (2 ranks)
+[RESILIENCE] Iteration 10: Global theta state checkpointed at path checkpoints/_resilience_test/checkpoint_iter_0010.npy (every 5 iters, retaining last 50). 
+
+============================================================
+STRESS TEST: QPU Latency Spiking
+  Pre-checkpoint energy (iter 5): -0.036019 Ha
+  Post-restart energy  (iter 6): -0.040576 Ha
+  Energy discontinuity: 0.004557 Ha
+============================================================
+[Chemistry:custom] [+   0.0s] driver.run() -- PySCF electronic structure
+Post-restart iterations: 5
+[LAYER 6] OK
+
+============================================================
+STRESS TEST: QPU Latency Spiking
+============================================================
+[Chemistry:custom] [+   0.0s] driver.run() -- PySCF electronic structure
+[Chemistry:custom] [+   0.0s] second_q_op() + JW mapping
+[Chemistry:custom] [+   0.0s] second_q_op() + JW mapping
+[Chemistry:custom] [+   0.0s] Hamiltonian: 15 Pauli terms, 4 qubits
+[Chemistry:custom] [+   0.0s] FCI ground-truth via PySCF
+[Chemistry:custom] [+   0.0s] Hamiltonian: 15 Pauli terms, 4 qubits
+[Chemistry:custom] [+   0.1s] FCI ground-truth via PySCF
+[Chemistry:custom] [+   0.1s] build_ansatz(tier=hwe_adaptive, reps=1) -- this is the slow one at high n
+[Chemistry:custom] [+   0.1s] build_ansatz(tier=hwe_adaptive, reps=1) -- this is the slow one at high n
+[Chemistry:custom] [+   0.1s] QASM3 serialization (24 params, 36 gates)
+[Chemistry:custom] [+   0.1s] QASM3 serialization (24 params, 36 gates)
+[Chemistry:custom] [+   0.1s] prepare() complete
+[Chemistry:custom] 15 Pauli terms, 4 qubits, 24 params, reps=1. FCI reference: -1.1373 Ha 
+[Ansatz] HWE (adaptive) (auto) | corr_score=0.342 | off_diag_ratio=0.056
+[Reason] score=0.342 in [0.25, 0.55). Moderate correlation (off_diag_ratio=0.056, zz_frac=0.667). Adaptive HWE with full entanglement recommended.
+[Chemistry:custom] [+   0.1s] prepare() complete
+[Chemistry:custom] 15 Pauli terms, 4 qubits, 24 params, reps=1. FCI reference: -1.1373 Ha 
+[Ansatz] HWE (adaptive) (auto) | corr_score=0.342 | off_diag_ratio=0.056
+[Reason] score=0.342 in [0.25, 0.55). Moderate correlation (off_diag_ratio=0.056, zz_frac=0.667). Adaptive HWE with full entanglement recommended.
+[Stack] Precision: fp64 for 4-qubit problem (GPU fits up to ~29 qubits at this precision)
+  [Latency Spike] Rank 1 injecting 0.74s delay
+Iter 0001/10 | E: -0.038631 | Δ: inf | M: 0.0063 | iter=  0.75s | ETA: 0m06s | Path: GPU-cuStateVec+cpu-expect MPI-distributed (2 ranks)
+  [Latency Spike] Rank 1 injecting 1.62s delay
+Iter 0002/10 | E: -0.049598 | Δ: 1.10e-02 | M: 0.0029 | iter=  1.63s | ETA: 0m13s | Path: GPU-cuStateVec+cpu-expect MPI-distributed (2 ranks)
+  [Latency Spike] Rank 1 injecting 0.61s delay
+Iter 0003/10 | E: -0.044341 | Δ: 5.26e-03 | M: 0.0077 | iter=  0.62s | ETA: 0m05s | Path: GPU-cuStateVec+cpu-expect MPI-distributed (2 ranks)
+  [Latency Spike] Rank 1 injecting 0.87s delay
+Iter 0004/10 | E: -0.046986 | Δ: 2.65e-03 | M: 0.0054 | iter=  0.88s | ETA: 0m05s | Path: GPU-cuStateVec+cpu-expect MPI-distributed (2 ranks)
+  [Latency Spike] Rank 1 injecting 1.41s delay
+Iter 0005/10 | E: -0.062542 | Δ: 1.56e-02 | M: 0.0033 | iter=  1.42s | ETA: 0m04s | Path: GPU-cuStateVec+cpu-expect MPI-distributed (2 ranks)
+[RESILIENCE] Iteration 5: Global theta state checkpointed at path checkpoints/_stress_latency/checkpoint_iter_0005.npy (every 5 iters, retaining last 50). 
+  [Latency Spike] Rank 1 injecting 0.61s delay
+Iter 0006/10 | E: -0.054039 | Δ: 8.50e-03 | M: 0.0077 | iter=  0.61s | ETA: 0m03s | Path: GPU-cuStateVec+cpu-expect MPI-distributed (2 ranks)
+  [Latency Spike] Rank 1 injecting 1.05s delay
+Iter 0007/10 | E: -0.060178 | Δ: 6.14e-03 | M: 0.0044 | iter=  1.05s | ETA: 0m02s | Path: GPU-cuStateVec+cpu-expect MPI-distributed (2 ranks)
+  [Latency Spike] Rank 1 injecting 0.86s delay
+Iter 0008/10 | E: -0.064439 | Δ: 4.26e-03 | M: 0.0055 | iter=  0.86s | ETA: 0m01s | Path: GPU-cuStateVec+cpu-expect MPI-distributed (2 ranks)
+  [Latency Spike] Rank 1 injecting 1.98s delay
+Iter 0009/10 | E: -0.073227 | Δ: 8.79e-03 | M: 0.0024 | iter=  1.99s | ETA: 0m01s | Path: GPU-cuStateVec+cpu-expect MPI-distributed (2 ranks)
+  [Latency Spike] Rank 1 injecting 1.29s delay
+Iter 0010/10 | E: -0.088684 | Δ: 1.55e-02 | M: 0.0037 | iter=  1.30s | ETA: 0m00s | Path: GPU-cuStateVec+cpu-expect MPI-distributed (2 ranks)
+[RESILIENCE] Iteration 10: Global theta state checkpointed at path checkpoints/_stress_latency/checkpoint_iter_0010.npy (every 5 iters, retaining last 50). 
+
+============================================================
+STRESS TEST: Drop-Out Recovery
+============================================================
+  Completed 10 iterations in 11.17s under latency spiking
+  Energy range: 0.050053 Ha
+  MPI synchronization maintained across variable-latency ranks
+[STRESS TEST: Latency Spiking] OK
+
+============================================================
+STRESS TEST: Drop-Out Recovery
+============================================================
+[Chemistry:custom] [+   0.0s] driver.run() -- PySCF electronic structure
+[Chemistry:custom] [+   0.0s] driver.run() -- PySCF electronic structure
+[Chemistry:custom] [+   0.0s] second_q_op() + JW mapping
+[Chemistry:custom] [+   0.0s] second_q_op() + JW mapping
+[Chemistry:custom] [+   0.1s] Hamiltonian: 15 Pauli terms, 4 qubits
+[Chemistry:custom] [+   0.1s] FCI ground-truth via PySCF
+[Chemistry:custom] [+   0.1s] Hamiltonian: 15 Pauli terms, 4 qubits
+[Chemistry:custom] [+   0.1s] FCI ground-truth via PySCF
+[Chemistry:custom] [+   0.1s] build_ansatz(tier=hwe_adaptive, reps=1) -- this is the slow one at high n
+[Chemistry:custom] [+   0.1s] build_ansatz(tier=hwe_adaptive, reps=1) -- this is the slow one at high n
+[Chemistry:custom] [+   0.1s] QASM3 serialization (24 params, 36 gates)
+[Chemistry:custom] [+   0.1s] QASM3 serialization (24 params, 36 gates)
+[Chemistry:custom] [+   0.1s] prepare() complete
+[Chemistry:custom] 15 Pauli terms, 4 qubits, 24 params, reps=1. FCI reference: -1.1373 Ha 
+[Ansatz] HWE (adaptive) (auto) | corr_score=0.342 | off_diag_ratio=0.056
+[Reason] score=0.342 in [0.25, 0.55). Moderate correlation (off_diag_ratio=0.056, zz_frac=0.667). Adaptive HWE with full entanglement recommended.
+[Chemistry:custom] [+   0.1s] prepare() complete
+[Chemistry:custom] 15 Pauli terms, 4 qubits, 24 params, reps=1. FCI reference: -1.1373 Ha 
+[Ansatz] HWE (adaptive) (auto) | corr_score=0.342 | off_diag_ratio=0.056
+[Reason] score=0.342 in [0.25, 0.55). Moderate correlation (off_diag_ratio=0.056, zz_frac=0.667). Adaptive HWE with full entanglement recommended.
+[Stack] Precision: fp64 for 4-qubit problem (GPU fits up to ~29 qubits at this precision)
+Iter 0001/10 | E: -0.036757 | Δ: inf | M: 246.5152 | iter=  0.01s | ETA: 0m00s | Path: GPU-cuStateVec+cpu-expect MPI-distributed (2 ranks)
+Iter 0002/10 | E: -0.034451 | Δ: 2.31e-03 | M: 447.7126 | iter=  0.01s | ETA: 0m00s | Path: GPU-cuStateVec+cpu-expect MPI-distributed (2 ranks)
+Iter 0003/10 | E: -0.045015 | Δ: 1.06e-02 | M: 11.5630 | iter=  0.01s | ETA: 0m00s | Path: GPU-cuStateVec+cpu-expect MPI-distributed (2 ranks)
+Iter 0004/10 | E: -0.029154 | Δ: 1.59e-02 | M: 11.5477 | iter=  0.01s | ETA: 0m00s | Path: GPU-cuStateVec+cpu-expect MPI-distributed (2 ranks)
+Iter 0005/10 | E: -0.051905 | Δ: 2.28e-02 | M: 432.7696 | iter=  0.01s | ETA: 0m00s | Path: GPU-cuStateVec+cpu-expect MPI-distributed (2 ranks)
+[RESILIENCE] Iteration 5: Global theta state checkpointed at path checkpoints/_stress_dropout/checkpoint_iter_0005.npy (every 5 iters, retaining last 50). 
+Iter 0006/10 | E: -0.057849 | Δ: 5.94e-03 | M: 11.8269 | iter=  0.01s | ETA: 0m00s | Path: GPU-cuStateVec+cpu-expect MPI-distributed (2 ranks)
+Iter 0007/10 | E: -0.064292 | Δ: 6.44e-03 | M: 387.3174 | iter=  0.01s | ETA: 0m00s | Path: GPU-cuStateVec+cpu-expect MPI-distributed (2 ranks)
+Iter 0008/10 | E: -0.060893 | Δ: 3.40e-03 | M: 11.2948 | iter=  0.01s | ETA: 0m00s | Path: GPU-cuStateVec+cpu-expect MPI-distributed (2 ranks)
+Iter 0009/10 | E: -0.066076 | Δ: 5.18e-03 | M: 429.2177 | iter=  0.01s | ETA: 0m00s | Path: GPU-cuStateVec+cpu-expect MPI-distributed (2 ranks)
+Iter 0010/10 | E: -0.086044 | Δ: 2.00e-02 | M: 444.9600 | iter=  0.01s | ETA: 0m00s | Path: GPU-cuStateVec+cpu-expect MPI-distributed (2 ranks)
+[RESILIENCE] Iteration 10: Global theta state checkpointed at path checkpoints/_stress_dropout/checkpoint_iter_0010.npy (every 5 iters, retaining last 50). 
+  Phase 1: 10 iterations, E(5)=-0.051905, E(10)=-0.086044
+  [Crash Simulated] Deleted checkpoints/_stress_dropout/checkpoint_iter_0010.npy — system must recover from iter 5
+[Chemistry:custom] [+   0.0s] driver.run() -- PySCF electronic structure
+[Chemistry:custom] [+   0.0s] driver.run() -- PySCF electronic structure
+[Chemistry:custom] [+   0.0s] second_q_op() + JW mapping
+[Chemistry:custom] [+   0.0s] second_q_op() + JW mapping
+[Chemistry:custom] [+   0.0s] Hamiltonian: 15 Pauli terms, 4 qubits
+[Chemistry:custom] [+   0.1s] FCI ground-truth via PySCF
+[Chemistry:custom] [+   0.1s] Hamiltonian: 15 Pauli terms, 4 qubits
+[Chemistry:custom] [+   0.1s] FCI ground-truth via PySCF
+[Chemistry:custom] [+   0.1s] build_ansatz(tier=hwe_adaptive, reps=1) -- this is the slow one at high n
+[Chemistry:custom] [+   0.1s] build_ansatz(tier=hwe_adaptive, reps=1) -- this is the slow one at high n
+[Chemistry:custom] [+   0.1s] QASM3 serialization (24 params, 36 gates)
+[Chemistry:custom] [+   0.1s] QASM3 serialization (24 params, 36 gates)
+[Chemistry:custom] [+   0.1s] prepare() complete
+[Chemistry:custom] 15 Pauli terms, 4 qubits, 24 params, reps=1. FCI reference: -1.1373 Ha 
+[Ansatz] HWE (adaptive) (auto) | corr_score=0.342 | off_diag_ratio=0.056
+[Reason] score=0.342 in [0.25, 0.55). Moderate correlation (off_diag_ratio=0.056, zz_frac=0.667). Adaptive HWE with full entanglement recommended.
+[Chemistry:custom] [+   0.1s] prepare() complete
+[Chemistry:custom] 15 Pauli terms, 4 qubits, 24 params, reps=1. FCI reference: -1.1373 Ha 
+[Ansatz] HWE (adaptive) (auto) | corr_score=0.342 | off_diag_ratio=0.056
+[Reason] score=0.342 in [0.25, 0.55). Moderate correlation (off_diag_ratio=0.056, zz_frac=0.667). Adaptive HWE with full entanglement recommended.
+[Stack] Precision: fp64 for 4-qubit problem (GPU fits up to ~29 qubits at this precision)
+[RESILIENCE] resume=True: auto-detected latest valid checkpoint checkpoints/_stress_dropout/checkpoint_iter_0005.npy
+[RESILIENCE] Loading θ from checkpoints/_stress_dropout/checkpoint_iter_0005.npy...
+[RESILIENCE] Resuming SPSA schedle from iteration 5  
+Iter 0006/10 | E: -0.062528 | Δ: inf | M: 426.0652 | iter=  0.01s | ETA: 0m00s | Path: GPU-cuStateVec+cpu-expect MPI-distributed (2 ranks)
+Iter 0007/10 | E: -0.057976 | Δ: 4.55e-03 | M: 10.7779 | iter=  0.01s | ETA: 0m00s | Path: GPU-cuStateVec+cpu-expect MPI-distributed (2 ranks)
+Iter 0008/10 | E: -0.065825 | Δ: 7.85e-03 | M: 423.8197 | iter=  0.01s | ETA: 0m00s | Path: GPU-cuStateVec+cpu-expect MPI-distributed (2 ranks)
+Iter 0009/10 | E: -0.070011 | Δ: 4.19e-03 | M: 435.0752 | iter=  0.01s | ETA: 0m00s | Path: GPU-cuStateVec+cpu-expect MPI-distributed (2 ranks)
+Iter 0010/10 | E: -0.123163 | Δ: 5.32e-02 | M: 344.7381 | iter=  0.01s | ETA: 0m00s | Path: GPU-cuStateVec+cpu-expect MPI-distributed (2 ranks)
+[RESILIENCE] Iteration 10: Global theta state checkpointed at path checkpoints/_stress_dropout/checkpoint_iter_0010.npy (every 5 iters, retaining last 50). 
+Iter 0011/10 | E: -0.146806 | Δ: 2.36e-02 | M: 10.1279 | iter=  0.01s | ETA: 0m00s | Path: GPU-cuStateVec+cpu-expect MPI-distributed (2 ranks)
+Iter 0012/10 | E: -0.177184 | Δ: 3.04e-02 | M: 447.8697 | iter=  0.01s | ETA: 0m00s | Path: GPU-cuStateVec+cpu-expect MPI-distributed (2 ranks)
+Iter 0013/10 | E: -0.279957 | Δ: 1.03e-01 | M: 9.4278 | iter=  0.01s | ETA: 0m00s | Path: GPU-cuStateVec+cpu-expect MPI-distributed (2 ranks)
+Iter 0014/10 | E: -0.287208 | Δ: 7.25e-03 | M: 12.6533 | iter=  0.01s | ETA: 0m00s | Path: GPU-cuStateVec+cpu-expect MPI-distributed (2 ranks)
+Iter 0015/10 | E: -0.287555 | Δ: 3.47e-04 | M: 424.9423 | iter=  0.01s | ETA: 0m00s | Path: GPU-cuStateVec+cpu-expect MPI-distributed (2 ranks)
+[RESILIENCE] Iteration 15: Global theta state checkpointed at path checkpoints/_stress_dropout/checkpoint_iter_0015.npy (every 5 iters, retaining last 50). 
+  Phase 2: 10 post-recovery iterations, final E=-0.287555
+
+============================================================
+  Recovery successful: resume=True auto-detected and validated the iter-5 checkpoint after the iter-10 checkpoint was deleted, with no explicit path given
+TRIAL RUN SUMMARY
+[STRESS TEST: Drop-Out Recovery] OK
+============================================================
+
+============================================================
+TRIAL RUN SUMMARY
+============================================================
+MPI ranks used: 2
+GPU enabled: True
+Backend: simulator
+Tests passed: 7 / 7
+[PASS] MPI Bridge
+[PASS] Problem Preparation
+[PASS] C++ Dispatcher
+[PASS] VQE Loop
+[PASS] Checkpoint Resilience
+[PASS] Latency Spiking
+[PASS] Drop-Out Recovery
+
+  All layers verified, stack is ready.
+[   12.97s] Log closed
+[   12.87s] Log closed

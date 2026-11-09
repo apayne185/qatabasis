@@ -158,6 +158,21 @@ class HardwareProfile:
 
     def _detect_mpi(self) -> None:
         try:
+            # mpi4py.rc.initialize defaults to True -- importing mpi4py.MPI
+            # auto-inits MPI as an import side effect unless this is set
+            # first. interface.py sets it too, but only takes effect if
+            # interface.py is imported before any other mpi4py import. If
+            # HardwareProfile.detect() runs first (e.g. a script that
+            # checks hardware before constructing QatabasisStack), THIS
+            # import is the first one, auto-inits MPI, and QatabasisStack's
+            # later hpc_core.init_mpi() (MPI_Init_thread) then double-inits
+            # and aborts with "has attempted to initialize MPI more than
+            # once." Set it here too (idempotent, safe even if mpi4py is
+            # already imported/initialized elsewhere) so detection order
+            # never determines whether a later QatabasisStack() construction
+            # crashes.
+            import mpi4py
+            mpi4py.rc.initialize = False
             from mpi4py import MPI
             self.has_mpi = True
             # MPI may not be initialized yet (interface.py defers init to hpc_core.init_mpi).
@@ -243,6 +258,20 @@ class HardwareProfile:
         # Reserve ~25% for gates / Qiskit overhead, then split what's left
         # across however many ranks are sharing this physical GPU.
         usable = self.gpu_memory_gb * 0.75 * (1024 ** 3) / ranks_per_gpu
+        # Every SPSA iteration builds TWO full statevectors concurrently
+        # per rank (sv_plus and sv_minus, see interface.py's
+        # _build_statevector call sites in _evaluate_distributed_statevector
+        # / _evaluate_ibm_estimator) -- this formula previously budgeted for
+        # only one, silently predicting a "fits" verdict with zero real
+        # margin at the exact boundary. Confirmed as a real OOM, not a
+        # theoretical risk: CO2 (30q, fp32, mpi_size=2) was predicted to fit
+        # exactly at n=30 by the one-statevector formula, then was killed
+        # by the Linux OOM killer (signal 9) on its very first SPSA
+        # iteration -- the two-statevector real requirement exceeded what
+        # was actually available. Halving `usable` here instead of leaving
+        # it to a one-statevector assumption restores the margin this
+        # function's own warning message already implies it should have.
+        usable = usable / 2
         n = 0
         while (2 ** (n + 1)) * bytes_per_amp <= usable:
             n += 1
