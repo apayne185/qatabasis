@@ -1,7 +1,6 @@
 import sys
 import os
 import json
-import numpy as np
 import time
 from datetime import datetime
 
@@ -11,6 +10,19 @@ _root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, _root)
 sys.path.insert(0, os.path.join(_root, "build"))
 
+# numpy must NOT be imported before src.api.interface: that module's
+# OMP_NUM_THREADS/OPENBLAS_NUM_THREADS/MKL_NUM_THREADS setdefault() calls
+# (interface.py's own top-of-file comment) only work if they run before
+# numpy loads its BLAS backend -- BLAS reads these once at process start,
+# not per-call. This script used to `import numpy as np` first, which
+# silently defeated that cap for every multi-rank run: confirmed live on
+# a Lambda A100 (2026-11-09) via `top` showing each of 8 MPI ranks at
+# 170-500% CPU (load average 63.7 on a 30-core host) during a P=8 run,
+# and BeH2/H2O wall-time regressing ~6.5x from P=2 to P=4 as a result --
+# the exact oversubscription bug a564c67 already fixed for
+# exp1_clean_sweep.py, just reintroduced here via a different import
+# order. Import interface (and therefore numpy, as its transitive
+# dependency) first so the thread caps land before BLAS initializes.
 try:
     from src.api.interface import QatabasisStack
     from src.api.problems import ChemistryProblem, FinanceProblem, ANSATZ_TIERS
@@ -23,6 +35,8 @@ try:
 except ImportError as e:
     print(f"failed to import hpc_core module: {e}")
     sys.exit(1)
+
+import numpy as np
 
 
 
