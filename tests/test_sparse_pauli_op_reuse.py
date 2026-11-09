@@ -26,6 +26,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import pytest
 from qiskit.circuit.library import EfficientSU2
 from qiskit.quantum_info import SparsePauliOp
 from qiskit_aer import AerSimulator
@@ -38,6 +39,7 @@ def _expectation(sim, bound_circuit, op, label):
     return float(result.data(0)[label].real)
 
 
+@pytest.mark.gpu
 def test_fresh_vs_reused_sparse_pauli_op():
     """Representative 4-qubit ansatz + a fake H2-shaped Hamiltonian, same
     structure as GPU_EXPECTATION_FIX.md's own local correctness check.

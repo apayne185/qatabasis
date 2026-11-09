@@ -42,11 +42,15 @@ jobs:
 
       - name: Run pytest suite (hardware profile + molecule resolver)
         run: |
-          # -m "not network": deselect PubChem-lookup tests so CI doesn't flake
-          # on an external service; test_layers_run.py is excluded by pytest.ini
+          # -m "not network and not gpu": deselect PubChem-lookup tests so CI
+          # doesn't flake on an external service, and deselect GPU-only tests
+          # (e.g. test_sparse_pauli_op_reuse.py, which hard-requires
+          # AerSimulator(device="GPU")) since GitHub-hosted runners have no
+          # CUDA device -- those run separately via `make test-sparse-pauli-reuse`
+          # on GPU hardware. test_layers_run.py is excluded by pytest.ini
           # (it's MPI-orchestrated, run separately via `make trial` above).
           # rdkit isn't installed in this image, so SMILES tests self-skip.
-          docker run --rm vqe-mpi-gpu python3 -m pytest -m "not network"
+          docker run --rm vqe-mpi-gpu python3 -m pytest -m "not network and not gpu"
 
       - name: Run serial baseline (H2 only, fast)
         run: |
