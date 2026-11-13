@@ -1,0 +1,6 @@
+=== Controlled N2 rerun starting at Fri Nov 13 14:57:28 UTC 2026 ===
+Sep1 commit:  cfa44732685e8e96abe15676ccdf3be47ed82f16
+Nov3 commit:  2d66360c025462b1f8ac2d1da544b5317f4b5e82
+GPU: NVIDIA A100-SXM4-40GB
+Host: 132-145-128-148
+=== BOTH RUNS COMPLETE at Fri Nov 13 15:25:11 UTC 2026 ===
