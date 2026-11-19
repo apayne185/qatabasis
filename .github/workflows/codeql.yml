@@ -32,7 +32,9 @@ jobs:
           category: "/language:python"
 
   analyze-cpp:
-    runs-on: ubuntu-latest
+    # Pinned: ubuntu-latest is rolling over to Ubuntu 26 (from 2026-10-19),
+    # so which image a run lands on is not deterministic.
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
       security-events: write
@@ -57,34 +59,39 @@ jobs:
       # is NOT analyzed by this job. bridge.cpp/dispatcher.cpp/qpu_client.cpp
       # (the pybind11 boundary code, where unsafe pointer/buffer handling
       # risk concentrates) are covered.
-      # ubuntu-latest is now 24.04 ("noble"), whose default repos don't
-      # carry python3.11 at all (24.04 ships 3.12 by default) --
-      # CMakeLists.txt hard-pins find_package(Python 3.11 ...), so install
-      # the exact version via deadsnakes rather than loosen that pin (which
-      # is project build config, not CI-only, and unverified for any
-      # 3.11-specific API dependency in the C++ code).
+      # Python 3.11 comes from actions/setup-python (prebuilt, cached on
+      # the runner, ships headers for Development.Module) rather than the
+      # deadsnakes PPA: add-apt-repository depends on Launchpad, and a
+      # failed apt step (exit 100) turned main red on 2026-11-16 with no
+      # code change. CMakeLists.txt hard-pins find_package(Python 3.11 ...),
+      # so the exact version still matters -- only its source changed.
+      - name: Set up Python 3.11
+        id: py311
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      # Retries cover transient mirror hiccups on the remaining
+      # Ubuntu-archive packages.
       - name: Install build dependencies
         run: |
-          sudo add-apt-repository -y ppa:deadsnakes/ppa
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
+          sudo apt-get -o Acquire::Retries=3 update
+          sudo apt-get -o Acquire::Retries=3 install -y --no-install-recommends \
             build-essential cmake \
             libopenmpi-dev openmpi-bin \
             libcurl4-openssl-dev libopenblas-dev \
-            python3.11 python3.11-dev python3.11-venv libgfortran5 libgomp1
+            libgfortran5 libgomp1
 
-      # Must install into the 3.11 interpreter specifically, not the
-      # system default (3.12) -- CMakeLists.txt's pybind11_DIR resolution
-      # runs `${Python_EXECUTABLE} -c "import pybind11; ..."`, so pybind11
-      # has to be importable from the same interpreter CMake is told to use
-      # below, not just "a" python3 on PATH.
+      # Must install into the same interpreter CMake is told to use below --
+      # CMakeLists.txt's pybind11_DIR resolution runs
+      # `${Python_EXECUTABLE} -c "import pybind11; ..."`.
       - name: Install pybind11 into Python 3.11
-        run: python3.11 -m ensurepip --upgrade && python3.11 -m pip install pybind11
+        run: ${{ steps.py311.outputs.python-path }} -m pip install pybind11
 
       - name: Build hpc_core (CPU-only -- no CUDA toolkit on this runner)
         run: |
           mkdir -p build && cd build
-          cmake .. -DPython_EXECUTABLE=$(which python3.11)
+          cmake .. -DPython_EXECUTABLE=${{ steps.py311.outputs.python-path }}
           make -j$(nproc)
 
       - name: Perform CodeQL analysis
